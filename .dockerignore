@@ -1,0 +1,7 @@
+node_modules
+chrome-data
+data
+.DS_Store
+.google-tokens.json
+.env
+npm-debug.log
