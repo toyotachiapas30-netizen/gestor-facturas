@@ -6,17 +6,19 @@ const { launchBrowser, IS_CLOUD } = require('../utils/browser');
 // ── Session Management for Captcha Relay ──
 const activeSessions = {};
 
-// Optional: cleanup expired sessions every 5 mins
+// 🧹 CRITICAL: Automatic memory cleanup for idle browsers
 setInterval(() => {
   const now = Date.now();
-  for (const id in activeSessions) {
-    if (now - activeSessions[id].ts > 180000) { // 3 mins timeout
-      console.log(`🧹 Cleaning up expired session ${id}`);
-      if (activeSessions[id].browser) activeSessions[id].browser.close().catch(() => {});
+  const TIMEOUT = 2 * 60 * 1000; // 2 minutes
+  for (const [id, s] of Object.entries(activeSessions)) {
+    if (now - s.ts > TIMEOUT) {
+      console.log(`🧹 [Cleanup] Cerrando sesión inactiva: ${id}`);
+      if (s.browser) s.browser.close().catch(() => {});
       delete activeSessions[id];
     }
   }
-}, 300000);
+}, 30000); // Check every 30s
+
 
 const router = express.Router();
 

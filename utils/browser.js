@@ -28,7 +28,7 @@ const launchBrowser = async (extraArgs = []) => {
   const executablePath = IS_CLOUD ? getCloudChromePath() : CHROME_PATH_MAC;
   
   const launchOptions = {
-    headless: IS_CLOUD ? 'new' : false,
+    headless: 'new',
     executablePath: executablePath || undefined,
     defaultViewport: IS_CLOUD ? { width: 1280, height: 800 } : null,
     ignoreDefaultArgs: IS_CLOUD ? false : true,
