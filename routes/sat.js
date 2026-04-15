@@ -317,7 +317,10 @@ router.post('/print-init', async (req, res) => {
     await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
     
     console.log('🌐 [Init] Navegando al SAT...');
-    await page.goto('https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx', { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto('https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx', { 
+      waitUntil: 'domcontentloaded', 
+      timeout: 60000 
+    });
     
     await page.waitForSelector('#ctl00_MainContent_TxtUUID', { timeout: 15000 });
     
