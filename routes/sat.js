@@ -216,14 +216,12 @@ router.post('/imprimir-sat', async (req, res) => {
         throw new Error('El PDF generado está vacío.');
       }
 
-      const b64 = pdf.toString('base64');
-      console.log(`✅ PDF generado exitosamente (${b64.length} chars)`);
+      console.log(`✅ PDF generado exitosamente (${pdf.length} bytes)`);
 
-      return res.json({
-        ok: true,
-        mensaje: 'Constancia local generada para la nube.',
-        pdf: b64
-      });
+      // Send as binary PDF
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename=val-$uuid.pdf`);
+      return res.send(pdf);
 
     } else {
       // ── MODO LOCAL: Abrir Portal SAT Real ──
@@ -271,7 +269,7 @@ router.post('/imprimir-sat', async (req, res) => {
       await page.pdf({ path: pdfPath, format: 'A4', printBackground: true });
       exec(`open "${pdfPath}"`);
 
-      // Fallback: send screenshot if needed, but locally we open the file
+      // In local mode, we still return a JSON response to the app
       const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
       await browser.close();
 
@@ -284,6 +282,7 @@ router.post('/imprimir-sat', async (req, res) => {
   } catch (err) {
     if (browser) await browser.close().catch(() => {});
     console.error('SAT print error:', err.message);
+    // If it was already sending PDF headers, we can't send JSON anymore easily, but usually it fails before headers
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

@@ -144,6 +144,12 @@ function goStep1() {
     state.cfdi = parsed;
     state.sucursalFolderId = sucursalSel.value; // Store the branch
     renderCFDI();
+    
+    // Populate manual copy fields
+    document.getElementById('copy-uuid').value = parsed.uuid;
+    document.getElementById('copy-rfc-e').value = parsed.rfcEmisor;
+    document.getElementById('copy-rfc-r').value = parsed.rfcReceptor;
+
     goTo(1);
     // Auto-fill fields
     if (parsed.nombreEmisor) document.getElementById('inp-proveedor').value = parsed.nombreEmisor;
@@ -263,21 +269,44 @@ async function imprimirSAT() {
         serie:          c.serie || ''
       })
     });
-    const data = await r.json();
-    if (!data.ok) return showErr('err-step1', data.error);
-    
-    // Success — handle base64 PDF (cloud) or local opening (Mac)
-    if (data.pdf) {
-      console.log('✅ Constancia recibida, abriendo...');
-      const blob = b64toBlob(data.pdf, 'application/pdf');
+
+    // Check if it's a PDF or JSON error
+    const contentType = r.headers.get('content-type');
+    if (contentType && contentType.includes('application/pdf')) {
+      console.log('✅ PDF recibido como binario, abriendo...');
+      const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
+    } else {
+      const data = await r.json();
+      if (!data.ok) return showErr('err-step1', data.error);
+      
+      // Local mode success handling (if any)
+      if (data.screenshot) {
+        console.log('✅ Screenshot recibido (modo local)');
+      }
     }
   } catch(err) {
-    showErr('err-step1', 'Error al imprimir: '+err.message);
+    showErr('err-step1', 'Error al imprimir: ' + err.message);
   } finally {
     setLoading('btn-print-sat','spin-print-sat',false);
   }
+}
+
+function copiarAlPortapapeles(id) {
+  const el = document.getElementById(id);
+  el.select();
+  el.setSelectionRange(0, 99999);
+  navigator.clipboard.writeText(el.value).then(() => {
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '¡Copiado!';
+    btn.classList.add('btn-success');
+    setTimeout(() => {
+      btn.textContent = originalText;
+      btn.classList.remove('btn-success');
+    }, 2000);
+  });
 }
 
 // ── PASO 3: Google Drive ──────────────────────────────────────────────────────
