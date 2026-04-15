@@ -221,6 +221,27 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// ── PATCH /api/gastos/:id/estatus ────────────────
+router.patch('/:id/estatus', async (req, res) => {
+  const { id } = req.params;
+  const { estatus } = req.body;
+  const db = getDB();
+
+  try {
+    if (db.type === 'supabase') {
+      const { data, error } = await db.client.from('gastos').update({ estatus }).eq('id', id).select().single();
+      if (error) throw error;
+      return res.json({ ok: true, gasto: data });
+    } else {
+      db.client.prepare('UPDATE gastos SET estatus = ? WHERE id = ?').run(estatus, id);
+      const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+      return res.json({ ok: true, gasto: row });
+    }
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── DELETE /api/gastos/:id ────────────────
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
