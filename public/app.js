@@ -286,98 +286,12 @@ async function verificarSAT() {
   }
 }
 
-// CAPTCHA RELAY — Automated workflow for Cloud
-async function imprimirSAT() {
-  hideErr('err-step1');
-  setLoading('btn-print-sat','spin-print-sat',true);
+// SAT server-side printing removed to save resources on older Macs.
 
-  try {
-    const c = state.cfdi;
-    console.log('🏁 Iniciando proceso de impresión automática...');
-    
-    // First step: Initialize and get Captcha
-    const r = await fetch('/api/sat/print-init', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        uuid:           c.uuid,
-        rfcEmisor:      c.rfcEmisor,
-        rfcReceptor:    c.rfcReceptor
-      })
-    });
-
-    const data = await r.json();
-    if (!data.ok) throw new Error(data.error || 'Error al iniciar sesión');
-
-    // Show Captcha Modal
-    state.currentSessionId = data.sessionId;
-    document.getElementById('captcha-img').src = data.captcha;
-    document.getElementById('captcha-solution').value = '';
-    document.getElementById('captcha-overlay').style.display = 'flex';
-    document.getElementById('captcha-solution').focus();
-
-  } catch(err) {
-    showErr('err-step1', 'Error: ' + err.message);
-  } finally {
-    setLoading('btn-print-sat','spin-print-sat',false);
-  }
-}
 
 function closeCaptcha() {
-  document.getElementById('captcha-overlay').style.display = 'none';
-  state.currentSessionId = null;
-}
-
-async function submitCaptcha() {
-  const solution = document.getElementById('captcha-solution').value;
-  if (!solution) return alert('Por favor escribe el código de la imagen');
-  if (!state.currentSessionId) return closeCaptcha();
-
-  hideErr('err-step1');
-  setLoading('btn-captcha-submit', 'spin-captcha', true); // Add small spin if needed, using primary for now
-  document.getElementById('btn-captcha-submit').disabled = true;
-  document.getElementById('btn-captcha-submit').textContent = '⏳ Procesando...';
-
-  try {
-    const r = await fetch('/api/sat/print-solve', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        sessionId: state.currentSessionId,
-        solution: solution
-      })
-    });
-
-    const contentType = r.headers.get('content-type');
-    if (contentType && contentType.includes('application/pdf')) {
-      console.log('✅ PDF recibido, descargando...');
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      
-      // Force download to bypass popup blockers
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `SAT-${state.cfdi.uuid}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-      }, 100);
-
-      closeCaptcha();
-    } else {
-      const data = await r.json();
-      alert('⚠️ ' + (data.error || 'Código incorrecto. Intenta de nuevo.'));
-      // If failed, we usually close and they try again or we could refresh captcha, 
-      // but for simplicity we close session.
-      closeCaptcha();
-    }
-  } catch(err) {
-    alert('❌ Error al procesar: ' + err.message);
-    closeCaptcha();
-  } finally {
-    document.getElementById('btn-captcha-submit').disabled = false;
-    document.getElementById('btn-captcha-submit').textContent = '✅ Validar y Descargar';
-  }
+    const overlay = document.getElementById('captcha-overlay');
+    if (overlay) overlay.style.display = 'none';
 }
 
 function copiarAlPortapapeles(id) {
