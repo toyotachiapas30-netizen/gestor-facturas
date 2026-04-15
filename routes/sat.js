@@ -212,10 +212,17 @@ router.post('/imprimir-sat', async (req, res) => {
       const pdf = await page.pdf({ format: 'A4', printBackground: true });
       await browser.close();
 
+      if (!pdf || pdf.length === 0) {
+        throw new Error('El PDF generado está vacío.');
+      }
+
+      const b64 = pdf.toString('base64');
+      console.log(`✅ PDF generado exitosamente (${b64.length} chars)`);
+
       return res.json({
         ok: true,
         mensaje: 'Constancia local generada para la nube.',
-        pdf: pdf.toString('base64')
+        pdf: b64
       });
 
     } else {

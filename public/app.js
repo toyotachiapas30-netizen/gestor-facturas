@@ -838,16 +838,24 @@ window.addEventListener('DOMContentLoaded', () => {
 
 /** Helper to convert base64 to Blob for PDF display */
 function b64toBlob(b64Data, contentType = '', sliceSize = 512) {
-  const byteCharacters = atob(b64Data);
-  const byteArrays = [];
-  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-    const slice = byteCharacters.slice(offset, offset + sliceSize);
-    const byteNumbers = new Array(slice.length);
-    for (let i = 0; i < slice.length; i++) {
-      byteNumbers[i] = slice.charCodeAt(i);
+  // Clean string: remove any whitespace, newlines or Data-URI prefix
+  const cleaned = b64Data.replace(/^data:application\/pdf;base64,/, '').replace(/\s/g, '');
+  
+  try {
+    const byteCharacters = atob(cleaned);
+    const byteArrays = [];
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      byteArrays.push(byteArray);
     }
-    const byteArray = new Uint8Array(byteNumbers);
-    byteArrays.push(byteArray);
+    return new Blob(byteArrays, { type: contentType });
+  } catch (e) {
+    console.error('Error decoding base64:', e);
+    throw new Error('El archivo PDF recibido no es válido (Base64 corrupto).');
   }
-  return new Blob(byteArrays, { type: contentType });
 }
