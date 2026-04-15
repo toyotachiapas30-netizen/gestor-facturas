@@ -206,6 +206,43 @@ function renderCFDI() {
   document.getElementById('d-ver').textContent     = c.version;
   document.getElementById('d-moneda').textContent  = c.moneda;
   document.getElementById('d-total').textContent   = fmtMonto(c.total, c.moneda);
+  
+  updateBookmarklet();
+}
+
+function updateBookmarklet() {
+  const c = state.cfdi;
+  if (!c) return;
+
+  const code = `javascript:(function(){
+    const fill = (id, val) => { 
+      const el = document.getElementById(id); 
+      if(el) { 
+        el.value = val; 
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } 
+    };
+    fill('ctl00_MainContent_TxtUUID', '${c.uuid}');
+    fill('ctl00_MainContent_TxtRfcEmisor', '${c.rfcEmisor}');
+    fill('ctl00_MainContent_TxtRfcReceptor', '${c.rfcReceptor}');
+    console.log('✅ Datos de factura ${c.noFactura} llenados por el Gestor.');
+    const cap = document.getElementById('ctl00_MainContent_TxtGenerico');
+    if(cap) { cap.focus(); cap.scrollIntoView(); }
+  })();`.replace(/\s+/g, ' ');
+
+  const btn = document.getElementById('btn-bookmarklet');
+  if (btn) btn.href = code;
+
+  // Also update legacy copy fields
+  document.getElementById('copy-uuid').value = c.uuid;
+  document.getElementById('copy-rfc-e').value = c.rfcEmisor;
+  document.getElementById('copy-rfc-r').value = c.rfcReceptor;
+}
+
+function toggleManualData() {
+  const el = document.getElementById('manual-data-copy');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 // ── PASO 2: Verificar SAT ─────────────────────────────────────────────────────
