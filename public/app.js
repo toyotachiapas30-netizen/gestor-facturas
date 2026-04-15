@@ -17,8 +17,8 @@ const state = {
   currentSessionId: null  // For Captcha Relay
 };
 
-const TOTAL_STEPS = 5; // Archivos, SAT, Drive, Buzón, Contrarecibo
-const STEP_MAP = [0, 1, 2, 3, 6]; // Mapping of logical index to HTML element IDs
+const TOTAL_STEPS = 4; // Archivos, SAT, Drive, Contrarecibo
+const STEP_MAP = [0, 1, 2, 6]; // Mapping of logical index to HTML element IDs
 
 const CATEGORIAS = [
   'NORMATIVAS',

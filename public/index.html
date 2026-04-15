@@ -53,15 +53,13 @@
         <span class="step-label" id="lbl-0">1. Archivos</span>
         <span class="step-label" id="lbl-1">2. SAT</span>
         <span class="step-label" id="lbl-2">3. Drive</span>
-        <span class="step-label" id="lbl-3">4. Buzón</span>
-        <span class="step-label" id="lbl-6">5. Contrarec.</span>
+        <span class="step-label" id="lbl-6">4. Contrarec.</span>
       </div>
-      <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:20%"></div></div>
+      <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:25%"></div></div>
       <div class="step-dots">
         <div class="dot active" id="dot-0"></div>
         <div class="dot" id="dot-1"></div>
         <div class="dot" id="dot-2"></div>
-        <div class="dot" id="dot-3"></div>
         <div class="dot" id="dot-6"></div>
       </div>
     </div>
@@ -220,44 +218,11 @@
         <div class="alert err" id="err-step2"><span>⚠️</span><span id="err-step2-msg"></span></div>
 
         <div class="btn-row">
-          <button class="btn btn-outline" onclick="goTo(1)">← Atrás</button>
-          <button class="btn btn-primary" id="btn-drive" onclick="subirDrive()"><span class="spin" id="spin-drive" style="display:none"></span>☁️ Subir a Drive</button>
-        </div>
-        <div class="nav-btns"><div></div>
-          <button class="btn btn-primary" id="btn-next2" disabled onclick="goTo(3)">Subir a Buzón Autotec →</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══════════════════════════════════════════
-         PASO 4 — Autotec Buzón
-    ═══════════════════════════════════════════ -->
-    <div class="step-panel" id="step-3">
-      <div class="card">
-        <div class="sec-title">🌐 Paso 4 — Buzón Autotec FECG</div>
-        <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px;">Se abrirá el portal de Autotec automáticamente, se llenarán los datos y se subirá el XML. Esto puede tomar unos segundos.</p>
-
-        <div class="field">
-          <label>Orden de Compra (opcional)</label>
-          <input type="text" id="inp-orden-compra" placeholder="Dejar vacío si no aplica"/>
-        </div>
-
-        <div id="buzon-result" style="display:none">
-          <div class="badge vigente">
-            <div class="badge-icon">✅</div>
-            <div><div class="badge-title">XML enviado al Buzón</div><div class="badge-sub">Revisa la pantalla de confirmación abajo.</div></div>
-          </div>
-          <img id="buzon-screenshot" class="screenshot" src="" alt="Pantalla Autotec Buzón"/>
-        </div>
-
-        <div class="alert err" id="err-step3"><span>⚠️</span><span id="err-step3-msg"></span></div>
-
-        <div class="btn-row">
           <button class="btn btn-outline" onclick="goTo(2)">← Atrás</button>
-          <button class="btn btn-primary" id="btn-buzon" onclick="subirBuzon()"><span class="spin" id="spin-buzon" style="display:none"></span>🌐 Subir al Buzón</button>
+          <button class="btn btn-primary" id="btn-sheet" onclick="llenarContrarecibo()"><span class="spin" id="spin-sheet" style="display:none"></span>📊 Llenar Contrarecibo</button>
         </div>
         <div class="nav-btns"><div></div>
-          <button class="btn btn-primary" id="btn-next3" disabled onclick="goTo(4)">Llenar Contrarecibo →</button>
+          <button class="btn btn-primary" id="btn-next2" disabled onclick="goTo(3)">Llenar Contrarecibo →</button>
         </div>
       </div>
     </div>
@@ -269,7 +234,7 @@
     ═══════════════════════════════════════════ -->
     <div class="step-panel" id="step-6">
       <div class="card">
-        <div class="sec-title">📊 Paso 5 — Contrarecibo</div>
+        <div class="sec-title">📊 Paso 4 — Contrarecibo</div>
         <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px;">Busca el archivo de Contrarecibo en Google Drive por nombre (ej: SEFESO). Si no aparece, escribe el nombre completo del archivo.</p>
 
         <div class="field">
