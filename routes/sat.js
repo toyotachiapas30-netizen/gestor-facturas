@@ -1,62 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const xml2js = require('xml2js');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteer.use(StealthPlugin());
-const path = require('path');
-const fs = require('fs');
-
-// Detect if running in cloud (Linux/Docker) or Local (Mac)
-const IS_CLOUD = process.env.NODE_ENV === 'production' || process.env.PUPPETEER_EXECUTABLE_PATH;
-
-const CHROME_PATH_MAC = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-
-function getCloudChromePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
-  
-  // Try common paths in Linux/Render/Docker
-  const paths = [
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/usr/bin/google-chrome'
-  ];
-  
-  for (const p of paths) {
-    if (fs.existsSync(p)) return p;
-  }
-  
-  return null; // Let puppeteer-extra try to find it automatically
-}
-
-const USER_DATA_DIR = path.join(__dirname, '../chrome-data');
-
-const launchBrowser = () => {
-  const executablePath = IS_CLOUD ? getCloudChromePath() : CHROME_PATH_MAC;
-  const launchOptions = {
-    headless: IS_CLOUD ? 'new' : false,
-    executablePath: executablePath || undefined, // undefined lets Puppeteer auto-detect
-    defaultViewport: IS_CLOUD ? { width: 1280, height: 800 } : null,
-    ignoreDefaultArgs: IS_CLOUD ? false : true,
-    args: IS_CLOUD ? [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--lang=es-MX,es;q=0.9'
-    ] : [
-      '--remote-debugging-port=0',
-      `--user-data-dir=${USER_DATA_DIR}`,
-      '--start-maximized',
-      '--lang=es-MX,es;q=0.9',
-      '--no-first-run',
-      '--no-default-browser-check'
-    ]
-  };
-  
-  // In cloud, we don't use the persistent userDataDir by default to avoid permission issues
-  return puppeteer.launch(launchOptions);
-};
+const { launchBrowser, IS_CLOUD } = require('../utils/browser');
 
 // ── Session Management for Captcha Relay ──
 const activeSessions = {};

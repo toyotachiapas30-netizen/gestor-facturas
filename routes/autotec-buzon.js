@@ -1,12 +1,5 @@
 const express = require('express');
-const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const launchBrowser = (extraArgs = []) => require('puppeteer').launch({
-  headless: false,
-  executablePath: CHROME_PATH,
-  defaultViewport: null,
-  args: ['--ignore-certificate-errors', '--disable-web-security', ...extraArgs]
-});
-
+const { launchBrowser, IS_CLOUD } = require('../utils/browser');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -46,9 +39,9 @@ router.post('/buzon', (req, res, next) => getUpload().fields([{ name: 'xml' }, {
 
   let browser;
   try {
-    browser = await launchBrowser();
+    browser = await launchBrowser(['--ignore-certificate-errors', '--disable-web-security']);
     const page = await browser.newPage();
-    await page.goto(URL_BUZON, { waitUntil: 'networkidle2', timeout: 45000 });
+    await page.goto(URL_BUZON, { waitUntil: IS_CLOUD ? 'domcontentloaded' : 'networkidle2', timeout: 45000 });
 
     await page.waitForSelector('input[type="text"]', { timeout: 15000 });
     const textInputs = await page.$$('input[type="text"]');
