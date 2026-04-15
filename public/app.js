@@ -314,7 +314,18 @@ async function submitCaptcha() {
       console.log('✅ PDF recibido, descargando...');
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      
+      // Force download to bypass popup blockers
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `SAT-${state.cfdi.uuid}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 100);
+
       closeCaptcha();
     } else {
       const data = await r.json();

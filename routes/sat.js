@@ -361,25 +361,47 @@ router.post('/print-solve', async (req, res) => {
     
     await page.type('#ctl00_MainContent_TxtGenerico', solution, { delay: 30 });
     
-    // Click and wait for result
-    await Promise.all([
-      page.click('#ctl00_MainContent_BtnVerificar'),
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {})
-    ]);
+    // Click and wait for result or error
+    await page.click('#ctl00_MainContent_BtnVerificar');
+    
+    // Wait for the result panel or the error message
+    // On success: #ctl00_MainContent_PnlResultados exists
+    // On error: The page usually stays on the same URL but can show text like "El código de seguridad es incorrecto"
+    try {
+      await page.waitForFunction(() => {
+        const text = document.body.innerText;
+        return !!document.querySelector('#ctl00_MainContent_PnlResultados') || 
+               text.includes('Vigente') || 
+               text.includes('Cancelado') ||
+               text.includes('incorrecto') ||
+               text.includes('intente de nuevo');
+      }, { timeout: 25000 });
+    } catch (e) {
+      console.warn('Timeout waiting for SAT result, continuing anyway to check state');
+    }
 
-    // Check if result exists
-    const resultExists = await page.evaluate(() => {
+    // Evaluate result
+    const result = await page.evaluate(() => {
       const text = document.body.innerText;
-      return text.includes('Vigente') || text.includes('Cancelado') || !!document.querySelector('#ctl00_MainContent_PnlResultados');
+      const resultsDiv = document.querySelector('#ctl00_MainContent_PnlResultados');
+      const isSuccess = !!resultsDiv || text.includes('Vigente') || text.includes('Cancelado');
+      const isError = text.includes('incorrecto') || text.includes('intente de nuevo');
+      
+      return { isSuccess, isError, text: text.slice(0, 500) }; // snippet for debugging
     });
 
-    if (!resultExists) {
-      throw new Error('Código incorrecto o el SAT no respondió. Intentalo de nuevo.');
+    if (!result.isSuccess) {
+      const msg = result.isError ? 'Código capturado incorrecto. Por favor intenta de nuevo.' : 'No se pudo validar en el SAT. Revisa el código.';
+      throw new Error(msg);
     }
 
     // Generate PDF
     console.log('🖨️ Generando PDF oficial...');
-    const pdf = await page.pdf({ format: 'A4', printBackground: true });
+    const pdf = await page.pdf({ 
+      format: 'A4', 
+      printBackground: true,
+      margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' }
+    });
     
     // Cleanup
     await browser.close().catch(() => {});
