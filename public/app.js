@@ -13,7 +13,8 @@ const state = {
   mailOk: false,
   portalOk: false,      // step 6
   selectedSheetId: null,// step 7
-  sucursalFolderId: null // Save selected branch
+  sucursalFolderId: null, // Save selected branch
+  currentSessionId: null  // For Captcha Relay
 };
 
 const TOTAL_STEPS = 5; // Archivos, SAT, Drive, Buzón, Contrarecibo
@@ -248,48 +249,86 @@ async function verificarSAT() {
   }
 }
 
-// Print from real SAT page using Puppeteer
+// CAPTCHA RELAY — Automated workflow for Cloud
 async function imprimirSAT() {
   hideErr('err-step1');
   setLoading('btn-print-sat','spin-print-sat',true);
 
   try {
     const c = state.cfdi;
-    const r = await fetch('/api/sat/imprimir-sat', {
+    console.log('🏁 Iniciando proceso de impresión automática...');
+    
+    // First step: Initialize and get Captcha
+    const r = await fetch('/api/sat/print-init', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         uuid:           c.uuid,
         rfcEmisor:      c.rfcEmisor,
-        rfcReceptor:    c.rfcReceptor,
-        total:          c.total,
-        emisorNombre:   c.nombreEmisor,
-        receptorNombre: c.nombreReceptor,
-        fecha:          c.fecha,
-        folio:          c.noFactura,
-        serie:          c.serie || ''
+        rfcReceptor:    c.rfcReceptor
       })
     });
 
-    // Check if it's a PDF or JSON error
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'Error al iniciar sesión');
+
+    // Show Captcha Modal
+    state.currentSessionId = data.sessionId;
+    document.getElementById('captcha-img').src = data.captcha;
+    document.getElementById('captcha-solution').value = '';
+    document.getElementById('captcha-overlay').style.display = 'flex';
+    document.getElementById('captcha-solution').focus();
+
+  } catch(err) {
+    showErr('err-step1', 'Error: ' + err.message);
+  } finally {
+    setLoading('btn-print-sat','spin-print-sat',false);
+  }
+}
+
+function closeCaptcha() {
+  document.getElementById('captcha-overlay').style.display = 'none';
+  state.currentSessionId = null;
+}
+
+async function submitCaptcha() {
+  const solution = document.getElementById('captcha-solution').value;
+  if (!solution) return alert('Por favor escribe el código de la imagen');
+  if (!state.currentSessionId) return closeCaptcha();
+
+  hideErr('err-step1');
+  setLoading('btn-captcha-submit', 'spin-captcha', true); // Add small spin if needed, using primary for now
+  document.getElementById('btn-captcha-submit').disabled = true;
+  document.getElementById('btn-captcha-submit').textContent = '⏳ Procesando...';
+
+  try {
+    const r = await fetch('/api/sat/print-solve', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        sessionId: state.currentSessionId,
+        solution: solution
+      })
+    });
+
     const contentType = r.headers.get('content-type');
     if (contentType && contentType.includes('application/pdf')) {
-      console.log('✅ PDF recibido como binario, abriendo...');
+      console.log('✅ PDF recibido, descargando...');
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
+      closeCaptcha();
     } else {
       const data = await r.json();
-      if (!data.ok) return showErr('err-step1', data.error);
-      
-      // Local mode success handling (if any)
-      if (data.screenshot) {
-        console.log('✅ Screenshot recibido (modo local)');
-      }
+      alert('⚠️ ' + (data.error || 'Código incorrecto. Intenta de nuevo.'));
+      // If failed, we usually close and they try again or we could refresh captcha, 
+      // but for simplicity we close session.
+      closeCaptcha();
     }
   } catch(err) {
-    showErr('err-step1', 'Error al imprimir: ' + err.message);
+    alert('❌ Error al procesar: ' + err.message);
+    closeCaptcha();
   } finally {
-    setLoading('btn-print-sat','spin-print-sat',false);
+    document.getElementById('btn-captcha-submit').disabled = false;
+    document.getElementById('btn-captcha-submit').textContent = '✅ Validar y Descargar';
   }
 }
 

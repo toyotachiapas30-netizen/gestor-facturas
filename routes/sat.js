@@ -58,6 +58,21 @@ const launchBrowser = () => {
   return puppeteer.launch(launchOptions);
 };
 
+// ── Session Management for Captcha Relay ──
+const activeSessions = {};
+
+// Optional: cleanup expired sessions every 5 mins
+setInterval(() => {
+  const now = Date.now();
+  for (const id in activeSessions) {
+    if (now - activeSessions[id].ts > 180000) { // 3 mins timeout
+      console.log(`🧹 Cleaning up expired session ${id}`);
+      if (activeSessions[id].browser) activeSessions[id].browser.close().catch(() => {});
+      delete activeSessions[id];
+    }
+  }
+}, 300000);
+
 const router = express.Router();
 
 const SAT_URL = 'https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc';
@@ -283,6 +298,96 @@ router.post('/imprimir-sat', async (req, res) => {
     if (browser) await browser.close().catch(() => {});
     console.error('SAT print error:', err.message);
     // If it was already sending PDF headers, we can't send JSON anymore easily, but usually it fails before headers
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+// ── CAPTCHA RELAY ENDPOINTS (Cloud Automation) ──
+
+// Phase 1: Initialize browser and get Captcha
+router.post('/print-init', async (req, res) => {
+  const { uuid, rfcEmisor, rfcReceptor } = req.body;
+  
+  let browser;
+  try {
+    browser = await launchBrowser();
+    const page = await browser.newPage();
+    
+    // Set realistic headers
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+    
+    console.log('🌐 [Init] Navegando al SAT...');
+    await page.goto('https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx', { waitUntil: 'networkidle2', timeout: 30000 });
+    
+    await page.waitForSelector('#ctl00_MainContent_TxtUUID', { timeout: 15000 });
+    
+    // Fill data
+    await page.type('#ctl00_MainContent_TxtUUID', uuid, { delay: 20 });
+    await page.type('#ctl00_MainContent_TxtRfcEmisor', rfcEmisor, { delay: 20 });
+    await page.type('#ctl00_MainContent_TxtRfcReceptor', rfcReceptor, { delay: 20 });
+
+    // Capture the captcha element
+    const captchaEl = await page.$('#ctl00_MainContent_ImgCaptcha');
+    if (!captchaEl) throw new Error('No se encontró la imagen del CAPTCHA');
+    
+    const captchaB64 = await captchaEl.screenshot({ encoding: 'base64' });
+    
+    const sessionId = require('crypto').randomUUID();
+    activeSessions[sessionId] = { browser, page, ts: Date.now(), uuid };
+    
+    console.log(`✅ Session ${sessionId} iniciada (Captcha relay)`);
+    return res.json({ ok: true, sessionId, captcha: `data:image/png;base64,${captchaB64}` });
+
+  } catch (err) {
+    if (browser) await browser.close().catch(() => {});
+    console.error('Print Init Error:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Phase 2: Solve with user input and generate PDF
+router.post('/print-solve', async (req, res) => {
+  const { sessionId, solution } = req.body;
+  const session = activeSessions[sessionId];
+  
+  if (!session) return res.status(400).json({ ok: false, error: 'Sesión expirada o inválida. Intenta de nuevo.' });
+
+  try {
+    const { page, browser, uuid } = session;
+    console.log(`🤖 [Solve] Procesando sesión ${sessionId}...`);
+    
+    await page.type('#ctl00_MainContent_TxtGenerico', solution, { delay: 30 });
+    
+    // Click and wait for result
+    await Promise.all([
+      page.click('#ctl00_MainContent_BtnVerificar'),
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {})
+    ]);
+
+    // Check if result exists
+    const resultExists = await page.evaluate(() => {
+      const text = document.body.innerText;
+      return text.includes('Vigente') || text.includes('Cancelado') || !!document.querySelector('#ctl00_MainContent_PnlResultados');
+    });
+
+    if (!resultExists) {
+      throw new Error('Código incorrecto o el SAT no respondió. Intentalo de nuevo.');
+    }
+
+    // Generate PDF
+    console.log('🖨️ Generando PDF oficial...');
+    const pdf = await page.pdf({ format: 'A4', printBackground: true });
+    
+    // Cleanup
+    await browser.close().catch(() => {});
+    delete activeSessions[sessionId];
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=sat-${uuid}.pdf`);
+    return res.send(pdf);
+
+  } catch (err) {
+    console.error('Print Solve Error:', err.message);
+    if (session.browser) await session.browser.close().catch(() => {});
+    delete activeSessions[sessionId];
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

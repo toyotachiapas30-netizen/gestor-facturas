@@ -506,6 +506,27 @@
   </div>
 </div>
 
+<!-- ══ Captcha Relay Overlay ══════════════════ -->
+<div id="captcha-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9000; display:none; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div style="background:#fff; padding:30px; border-radius:16px; width:90%; max-width:400px; text-align:center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);">
+    <h2 style="margin-top:0; color:#1e293b; font-size:20px;">🔒 Verificación SAT</h2>
+    <p style="font-size:14px; color:#64748b; margin-bottom:20px;">Escribe los caracteres que ves en la imagen para completar la descarga oficial:</p>
+    
+    <div style="background:#f8fafc; padding:15px; border-radius:12px; margin-bottom:20px; border:1px solid #e2e8f0;">
+      <img id="captcha-img" src="" alt="Cargando CAPTCHA..." style="max-width:100%; height:auto; border-radius:4px; filter: contrast(1.1);"/>
+    </div>
+
+    <div class="field">
+      <input type="text" id="captcha-solution" placeholder="Escribe aquí el código" style="text-align:center; font-size:24px; letter-spacing:4px; text-transform:uppercase; font-weight:bold; height:50px; border:2px solid #eb0a1e;"/>
+    </div>
+
+    <div class="btn-row" style="margin-top:20px; gap:10px;">
+      <button class="btn btn-outline" onclick="closeCaptcha()" style="flex:1">Cancelar</button>
+      <button class="btn btn-primary" id="btn-captcha-submit" onclick="submitCaptcha()" style="flex:1">✅ Validar y Descargar</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="app.js"></script>
 </body>
