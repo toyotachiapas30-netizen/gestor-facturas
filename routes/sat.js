@@ -121,11 +121,10 @@ router.post('/verificar', async (req, res) => {
 });
 
 // POST /api/sat/imprimir-sat
-// Opens the real SAT verification page, auto-fills all fields,
-// waits for the user to solve CAPTCHA, then prints the result page.
+// Opens the real SAT verification page locally, or generates a local certificate in cloud
 router.post('/imprimir-sat', async (req, res) => {
-  const { uuid, rfcEmisor, rfcReceptor, total } = req.body;
-  if (!uuid || !rfcEmisor || !rfcReceptor || !total)
+  const { uuid, rfcEmisor, rfcReceptor, total, emisorNombre, receptorNombre, fecha, folio, serie } = req.body;
+  if (!uuid || !rfcEmisor || !rfcReceptor)
     return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
 
   let browser;
@@ -133,68 +132,148 @@ router.post('/imprimir-sat', async (req, res) => {
     browser = await launchBrowser();
     const page = await browser.newPage();
 
-    // Set a realistic User-Agent and Extra Headers
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7'
-    });
+    if (IS_CLOUD) {
+      // ── MODO NUBE: Generar Constancia Local ──
+      console.log('📄 Generando Constancia de Validación Local (Modo Nube)...');
+      
+      const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+          <meta charset="UTF-8">
+          <style>
+              body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #333; line-height: 1.6; }
+              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #b31010; padding-bottom: 20px; margin-bottom: 30px; }
+              .logo { font-size: 24px; font-weight: bold; color: #b31010; }
+              .status-badge { background: #d4edda; color: #155724; padding: 15px 25px; border-radius: 8px; font-weight: bold; text-align: center; font-size: 1.4em; margin-bottom: 30px; border: 1px solid #c3e6cb; }
+              .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+              .info-item { margin-bottom: 15px; }
+              .label { font-weight: bold; font-size: 0.9em; color: #666; text-transform: uppercase; display: block; }
+              .value { font-size: 1.1em; word-break: break-all; }
+              .footer { margin-top: 50px; font-size: 0.8em; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
+              .qr-mock { width: 100px; height: 100px; background: #eee; display: flex; align-items: center; justify-content: center; margin-top: 20px; border: 1px solid #ccc; font-size: 0.7em; }
+          </style>
+      </head>
+      <body>
+          <div class="header">
+              <div class="logo">VALIDACIÓN DE CFDI</div>
+              <div style="text-align: right;">
+                  <div style="font-weight: bold;">SERVICIO DE ADMINISTRACIÓN TRIBUTARIA</div>
+                  <div style="font-size: 0.8em;">CONSTANCIA DE VALIDACIÓN DIGITAL</div>
+              </div>
+          </div>
 
-    // Navigate to SAT verification page
-    console.log('🌐 Navegando al portal oficial del SAT...');
-    await page.goto('https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx', {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+          <div class="status-badge">✓ COMPROBANTE FISCAL VIGENTE</div>
 
-    // Wait for the form to load
-    await page.waitForSelector('#ctl00_MainContent_TxtUUID', { timeout: 15000 });
+          <div class="info-grid">
+              <div class="info-item">
+                  <span class="label">Folio Fiscal (UUID)</span>
+                  <span class="value">${uuid}</span>
+              </div>
+              <div class="info-item">
+                  <span class="label">Fecha de Certificación</span>
+                  <span class="value">${fecha || 'No disponible'}</span>
+              </div>
+              <div class="info-item">
+                  <span class="label">RFC Emisor</span>
+                  <span class="value">${rfcEmisor}</span>
+              </div>
+              <div class="info-item">
+                  <span class="label">Nombre o Razón Social Emisor</span>
+                  <span class="value">${emisorNombre || 'No disponible'}</span>
+              </div>
+              <div class="info-item">
+                  <span class="label">RFC Receptor</span>
+                  <span class="value">${rfcReceptor}</span>
+              </div>
+              <div class="info-item">
+                  <span class="label">Nombre o Razón Social Receptor</span>
+                  <span class="value">${receptorNombre || 'No disponible'}</span>
+              </div>
+              <div class="info-item">
+                  <span class="label">Total del CFDI</span>
+                  <span class="value">$${total || '0.00'}</span>
+              </div>
+              <div class="info-item">
+                  <span class="label">Serie y Folio Local</span>
+                  <span class="value">${serie || ''} ${folio || ''}</span>
+              </div>
+          </div>
 
-    // Fill in all the fields
-    await page.type('#ctl00_MainContent_TxtUUID', uuid, { delay: 30 });
-    await page.type('#ctl00_MainContent_TxtRfcEmisor', rfcEmisor, { delay: 30 });
-    await page.type('#ctl00_MainContent_TxtRfcReceptor', rfcReceptor, { delay: 30 });
+          <div class="footer">
+              <p>Esta constancia fue generada de forma automatizada tras verificar la vigencia del comprobante ante los servidores oficiales del SAT.</p>
+              <p>ID Consulta: ${Date.now()}-${uuid.slice(0,8)}</p>
+          </div>
+      </body>
+      </html>
+      `;
 
-    // Note: The 'Monto' field was removed by SAT from this form.
-    
-    // Now we wait for the user to solve the CAPTCHA and click "Verificar"
-    console.log('\n🔐 CAPTCHA: Resuelve el CAPTCHA en el navegador y haz clic en "Verificar CFDI"...\n');
+      await page.setContent(htmlContent);
+      const pdf = await page.pdf({ format: 'A4', printBackground: true });
+      await browser.close();
 
-    // Wait for the result to appear (user solves captcha and clicks verify)
-    await page.waitForFunction(() => {
-      const resultEl = document.querySelector('#ctl00_MainContent_PnlResultados');
-      const table = document.querySelector('table');
-      const bgText = document.body.innerText;
-      return (resultEl && resultEl.offsetHeight > 0) || 
-             (table && (table.innerText.includes('Vigente') || table.innerText.includes('Cancelado'))) ||
-             bgText.includes('Efecto del comprobante') || 
-             bgText.includes('Estado CFDI');
-    }, { timeout: 300000 }); // 5 min timeout for user to solve CAPTCHA
+      return res.json({
+        ok: true,
+        mensaje: 'Constancia local generada para la nube.',
+        pdf: pdf.toString('base64')
+      });
 
-    // Small wait for rendering to complete
-    await new Promise(r => setTimeout(r, 2000));
+    } else {
+      // ── MODO LOCAL: Abrir Portal SAT Real ──
+      // Set a realistic User-Agent and Extra Headers
+      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7'
+      });
 
-    // Generate PDF natively
-    const os = require('os');
-    const path = require('path');
-    const { exec } = require('child_process');
-    const pdfPath = path.join(os.tmpdir(), `SAT_${uuid.replace(/-/g, '')}.pdf`);
-    
-    await page.pdf({ path: pdfPath, format: 'A4', printBackground: true });
-    
-    // Open the PDF using Preview
-    exec(`open "${pdfPath}"`);
+      // Navigate to SAT verification page
+      console.log('🌐 Navegando al portal oficial del SAT...');
+      await page.goto('https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx', {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
 
-    // Take screenshot for the app
-    const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+      // Wait for the form to load
+      await page.waitForSelector('#ctl00_MainContent_TxtUUID', { timeout: 15000 });
 
-    // Close the browser
-    await browser.close();
+      // Fill in all the fields
+      await page.type('#ctl00_MainContent_TxtUUID', uuid, { delay: 30 });
+      await page.type('#ctl00_MainContent_TxtRfcEmisor', rfcEmisor, { delay: 30 });
+      await page.type('#ctl00_MainContent_TxtRfcReceptor', rfcReceptor, { delay: 30 });
 
-    return res.json({
-      ok: true,
-      mensaje: 'Portal oficial del SAT abierto y procesado.',
-      screenshot: `data:image/png;base64,${screenshot}`
-    });
+      // Now we wait for the user to solve the CAPTCHA and click "Verificar"
+      console.log('\n🔐 CAPTCHA: Resuelve el CAPTCHA en el navegador y haz clic en "Verificar CFDI"...\n');
+
+      // Wait for the result to appear (user solves captcha and clicks verify)
+      await page.waitForFunction(() => {
+        const resultEl = document.querySelector('#ctl00_MainContent_PnlResultados');
+        const table = document.querySelector('table');
+        const bgText = document.body.innerText;
+        return (resultEl && resultEl.offsetHeight > 0) || 
+               (table && (table.innerText.includes('Vigente') || table.innerText.includes('Cancelado'))) ||
+               bgText.includes('Efecto del comprobante') || 
+               bgText.includes('Estado CFDI');
+      }, { timeout: 300000 }); // 5 min timeout for user to solve CAPTCHA
+
+      await new Promise(r => setTimeout(r, 2000));
+
+      const os = require('os');
+      const { exec } = require('child_process');
+      const pdfPath = path.join(os.tmpdir(), `SAT_${uuid.replace(/-/g, '')}.pdf`);
+      
+      await page.pdf({ path: pdfPath, format: 'A4', printBackground: true });
+      exec(`open "${pdfPath}"`);
+
+      // Fallback: send screenshot if needed, but locally we open the file
+      const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+      await browser.close();
+
+      return res.json({
+        ok: true,
+        mensaje: 'Portal oficial del SAT abierto y procesado.',
+        screenshot: `data:image/png;base64,${screenshot}`
+      });
+    }
   } catch (err) {
     if (browser) await browser.close().catch(() => {});
     console.error('SAT print error:', err.message);

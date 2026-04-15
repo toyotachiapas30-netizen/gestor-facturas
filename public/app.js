@@ -265,7 +265,14 @@ async function imprimirSAT() {
     });
     const data = await r.json();
     if (!data.ok) return showErr('err-step1', data.error);
-    // Success — the PDF was generated and opened in Preview
+    
+    // Success — handle base64 PDF (cloud) or local opening (Mac)
+    if (data.pdf) {
+      console.log('✅ Constancia recibida, abriendo...');
+      const blob = b64toBlob(data.pdf, 'application/pdf');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    }
   } catch(err) {
     showErr('err-step1', 'Error al imprimir: '+err.message);
   } finally {
@@ -828,3 +835,19 @@ window.addEventListener('DOMContentLoaded', () => {
   populateCategorias();
   loadMeses();
 });
+
+/** Helper to convert base64 to Blob for PDF display */
+function b64toBlob(b64Data, contentType = '', sliceSize = 512) {
+  const byteCharacters = atob(b64Data);
+  const byteArrays = [];
+  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+    const slice = byteCharacters.slice(offset, offset + sliceSize);
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    byteArrays.push(byteArray);
+  }
+  return new Blob(byteArrays, { type: contentType });
+}
