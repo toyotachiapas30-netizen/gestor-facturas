@@ -300,6 +300,8 @@ router.post('/imprimir-sat', async (req, res) => {
     // If it was already sending PDF headers, we can't send JSON anymore easily, but usually it fails before headers
     return res.status(500).json({ ok: false, error: err.message });
   }
+});
+
 // ── CAPTCHA RELAY ENDPOINTS (Cloud Automation) ──
 
 // Phase 1: Initialize browser and get Captcha
