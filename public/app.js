@@ -441,7 +441,13 @@ async function buscarSheetPorNombre() {
   statusEl.style.color = 'var(--text-muted)';
 
   let queryUrl = `/api/sheets/find?nombre=${encodeURIComponent(nombre)}`;
-  if (state.sucursalFolderId) queryUrl += `&folderId=${state.sucursalFolderId}`;
+  if (state.sucursalFolderId) {
+    queryUrl += `&folderId=${state.sucursalFolderId}`;
+  } else {
+    // Fallback: try to get it directly from the select just in case
+    const currentSuc = document.getElementById('inp-sucursal').value;
+    if (currentSuc) queryUrl += `&folderId=${currentSuc}`;
+  }
 
   try {
     const r = await fetch(queryUrl);
@@ -485,8 +491,10 @@ async function buscarSheetPorNombre() {
 async function loadSheets() {
   try {
     let queryUrl = '/api/sheets/find';
-    if (state.sucursalFolderId) queryUrl += `?folderId=${state.sucursalFolderId}`;
+    const currentSuc = state.sucursalFolderId || document.getElementById('inp-sucursal').value;
+    if (currentSuc) queryUrl += `?folderId=${currentSuc}`;
 
+    console.log(`📡 Solicitando hojas para sucursal: ${currentSuc}`);
     const r = await fetch(queryUrl);
     const data = await r.json();
     if (!data.ok || !data.sheets) return;

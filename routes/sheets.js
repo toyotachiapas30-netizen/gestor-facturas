@@ -33,16 +33,21 @@ router.get('/find', async (req, res) => {
   if (!client) return res.status(401).json({ ok: false, error: 'No autorizado con Google.' });
 
   const drive = getGoogle().drive({ version: 'v3', auth: client });
-  const folderId = req.query.folderId || process.env.GOOGLE_SHEETS_FOLDER_ID;
+  
+  // Strictly prioritize the folderId passed from the frontend
+  const folderId = (req.query.folderId && req.query.folderId.trim()) 
+    ? req.query.folderId 
+    : process.env.GOOGLE_SHEETS_FOLDER_ID;
+
   const nombre = req.query.nombre || '';
+  
+  console.log(`🔍 Buscando contrarecibo en carpeta: ${folderId} (Nombre: "${nombre}")`);
 
   try {
-    // Search strictly for Google Sheets to prevent 'Operation not supported' errors from Excel files
+    // Search strictly for Google Sheets inside the specified folder
     let q = `'${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
 
-    // If a provider name is given, filter by sheets whose name contains it
     if (nombre.trim()) {
-      // If user provided extension, search exact or contains
       const cleanNombre = nombre.trim().replace(/'/g, "\\'");
       q += ` and name contains '${cleanNombre}'`;
     }
