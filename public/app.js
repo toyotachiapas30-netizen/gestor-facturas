@@ -930,6 +930,15 @@ async function saveGasto() {
   }
 }
 
+async function loadStats() {
+  const rango = document.getElementById('filter-rango') ? document.getElementById('filter-rango').value : '30';
+  try {
+    const r = await fetch(`/api/gastos/stats?rango=${rango}`);
+    const data = await r.json();
+    if (data.ok) renderCharts(data.stats, rango);
+  } catch(e) { console.error('Stats error:', e); }
+}
+
 async function loadMeses() {
   try {
     const r = await fetch('/api/gastos/meses');
@@ -972,6 +981,7 @@ window.addEventListener('DOMContentLoaded', () => {
   checkGoogleAuth();
   populateCategorias();
   loadMeses();
+  loadGastos();
 });
 
 /** Helper to convert base64 to Blob for PDF display */
