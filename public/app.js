@@ -147,6 +147,14 @@ function goTo(n) {
     if (lbl) lbl.className = 'step-label' + (idx < n ? ' done' : idx === n ? ' active' : '');
   });
 
+  // Special behavior
+  if (n === 3) {
+    // We are in Paso 4 (logical 4, index 3)
+    const sucName = document.getElementById('inp-sucursal').options[document.getElementById('inp-sucursal').selectedIndex].text;
+    const indicator = document.getElementById('active-branch-name');
+    if (indicator) indicator.textContent = sucName;
+  }
+
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
@@ -483,12 +491,12 @@ async function loadSheets() {
     const data = await r.json();
     if (!data.ok || !data.sheets) return;
     const sel = document.getElementById('sel-sheet');
-    // Only add if not already populated
-    if (sel.options.length <= 1) {
-      data.sheets.forEach(s => {
-        const o = document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);
-      });
-    }
+    
+    // Always refresh the dropdown content
+    sel.innerHTML = '<option value="">— Selecciona la hoja —</option>';
+    data.sheets.forEach(s => {
+      const o = document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);
+    });
   } catch {}
 }
 
@@ -629,6 +637,10 @@ function resetFlow() {
   document.getElementById('sheets-result').style.display = 'none';
   document.getElementById('final-success').style.display = 'none';
   document.getElementById('btn-sheets-fill').style.display = 'none';
+
+  // Clear sheet selection so it reloads correctly next time
+  const sel = document.getElementById('sel-sheet');
+  if (sel) sel.innerHTML = '<option value="">— Selecciona la hoja —</option>';
   
   // Back to start
   goTo(0);
