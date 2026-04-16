@@ -378,6 +378,14 @@
             <option value="pagado">Pagado</option>
           </select>
         </div>
+        <div class="field">
+          <label>Desde</label>
+          <input type="date" id="filter-desde" onchange="loadGastos(); loadStats()" style="padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-main); font-family: inherit;">
+        </div>
+        <div class="field">
+          <label>Hasta</label>
+          <input type="date" id="filter-hasta" onchange="loadGastos(); loadStats()" style="padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-main); font-family: inherit;">
+        </div>
         <div class="field" style="flex:0;min-width:auto;">
           <label>&nbsp;</label>
           <button class="btn btn-primary btn-sm" onclick="openGastoForm()">➕ Nuevo Gasto</button>

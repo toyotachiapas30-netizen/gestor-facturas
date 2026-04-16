@@ -108,7 +108,7 @@ router.get('/check/:uuid', async (req, res) => {
 
 // ── GET /api/gastos  →  List expenses ──
 router.get('/', async (req, res) => {
-  const { mes, categoria, estatus } = req.query;
+  const { mes, categoria, estatus, desde, hasta } = req.query;
   const db = getDB();
 
   try {
@@ -117,6 +117,8 @@ router.get('/', async (req, res) => {
       if (mes) query = query.eq('mes', mes);
       if (categoria) query = query.eq('categoria', categoria);
       if (estatus) query = query.eq('estatus', estatus);
+      if (desde) query = query.gte('fecha_factura', desde);
+      if (hasta) query = query.lte('fecha_factura', hasta);
       
       const { data: rows, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
@@ -131,6 +133,9 @@ router.get('/', async (req, res) => {
       if (mes) { sql += ' AND mes = ?'; params.push(mes); }
       if (categoria) { sql += ' AND categoria = ?'; params.push(categoria); }
       if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
+      if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
+      if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
+      
       sql += ' ORDER BY created_at DESC';
 
       const rows = db.client.prepare(sql).all(...params);
@@ -276,20 +281,27 @@ router.get('/stats', async (req, res) => {
     const db = getDB();
     const rango = req.query.rango || 'todo';
     const mesFiltro = req.query.mes || '';
+    const desde = req.query.desde || '';
+    const hasta = req.query.hasta || '';
     
     if (db.type === 'supabase') {
       const now = new Date();
       let query = db.client.from('gastos').select('monto, categoria, mes, fecha_factura');
       
+      if (desde) query = query.gte('fecha_factura', desde);
+      if (hasta) query = query.lte('fecha_factura', hasta);
+
       if (mesFiltro) {
         query = query.eq('mes', mesFiltro);
-      } else if (rango === 'mes') {
-        query = query.eq('mes', now.toISOString().substring(0, 7));
-      } else if (rango === 'trimestre') {
-        const d = new Date(); d.setMonth(d.getMonth() - 2);
-        query = query.gte('mes', d.toISOString().substring(0, 7));
-      } else if (rango === 'anual') {
-        query = query.gte('mes', now.getFullYear() + '-01');
+      } else if (!desde && !hasta) {
+        if (rango === 'mes') {
+          query = query.eq('mes', now.toISOString().substring(0, 7));
+        } else if (rango === 'trimestre') {
+          const d = new Date(); d.setMonth(d.getMonth() - 2);
+          query = query.gte('mes', d.toISOString().substring(0, 7));
+        } else if (rango === 'anual') {
+          query = query.gte('mes', now.getFullYear() + '-01');
+        }
       }
 
       const { data: rows, error } = await query;
@@ -299,8 +311,7 @@ router.get('/stats', async (req, res) => {
       const byCategoryObj = {};
       
       rows.forEach(r => {
-        // If filtering by specific month, use date as label for the bar chart
-        const label = (mesFiltro || rango === 'mes') ? r.fecha_factura : r.mes;
+        const label = (mesFiltro || desde || hasta || rango === 'mes') ? r.fecha_factura : r.mes;
         monthlyObj[label] = (monthlyObj[label] || 0) + (r.monto || 0);
         byCategoryObj[r.categoria] = (byCategoryObj[r.categoria] || 0) + (r.monto || 0);
       });
@@ -311,25 +322,32 @@ router.get('/stats', async (req, res) => {
       return res.json({ ok: true, stats: { monthly, byCategory, yearly: [] } });
     } else {
       const sqlite = db.client;
-      let dateFilter = '';
+      let dateFilter = 'WHERE 1=1';
       let timeGroup = 'mes';
       let limit = 12;
 
       const now = new Date();
+
+      if (desde) dateFilter += ` AND fecha_factura >= '${desde}'`;
+      if (hasta) dateFilter += ` AND fecha_factura <= '${hasta}'`;
+
       if (mesFiltro) {
-        dateFilter = `WHERE mes = '${mesFiltro}'`;
+        dateFilter += ` AND mes = '${mesFiltro}'`;
         timeGroup = 'fecha_factura';
         limit = 31;
+      } else if (desde || hasta) {
+        timeGroup = 'fecha_factura';
+        limit = 100;
       } else if (rango === 'mes') {
-        dateFilter = `WHERE mes = '${now.toISOString().substring(0, 7)}'`;
+        dateFilter += ` AND mes = '${now.toISOString().substring(0, 7)}'`;
         timeGroup = 'fecha_factura';
         limit = 31;
       } else if (rango === 'trimestre') {
         now.setMonth(now.getMonth() - 2);
-        dateFilter = `WHERE mes >= '${now.toISOString().substring(0, 7)}'`;
+        dateFilter += ` AND mes >= '${now.toISOString().substring(0, 7)}'`;
         limit = 3;
       } else if (rango === 'anual') {
-        dateFilter = `WHERE SUBSTR(mes, 1, 4) = '${now.getFullYear()}'`;
+        dateFilter += ` AND SUBSTR(mes, 1, 4) = '${now.getFullYear()}'`;
       }
 
       const timeQuery = `SELECT ${timeGroup} as label, SUM(monto) as total FROM gastos ${dateFilter} GROUP BY label ORDER BY label DESC LIMIT ${limit}`;

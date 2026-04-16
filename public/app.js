@@ -697,11 +697,15 @@ async function loadGastos() {
   const mes = document.getElementById('filter-mes').value;
   const cat = document.getElementById('filter-cat').value;
   const est = document.getElementById('filter-estatus').value;
+  const desde = document.getElementById('filter-desde').value;
+  const hasta = document.getElementById('filter-hasta').value;
 
   let url = '/api/gastos?';
   if (mes) url += `mes=${encodeURIComponent(mes)}&`;
   if (cat) url += `categoria=${encodeURIComponent(cat)}&`;
   if (est) url += `estatus=${encodeURIComponent(est)}&`;
+  if (desde) url += `desde=${encodeURIComponent(desde)}&`;
+  if (hasta) url += `hasta=${encodeURIComponent(hasta)}&`;
 
   try {
     const r = await fetch(url);
@@ -958,9 +962,11 @@ async function saveGasto() {
 async function loadStats() {
   const rango = document.getElementById('filter-rango')?.value || '30';
   const mes = document.getElementById('filter-mes')?.value || '';
+  const desde = document.getElementById('filter-desde')?.value || '';
+  const hasta = document.getElementById('filter-hasta')?.value || '';
   
   try {
-    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}`);
+    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}`);
     const data = await r.json();
     if (data.ok) renderCharts(data.stats, rango);
   } catch(e) { 
