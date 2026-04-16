@@ -43,9 +43,18 @@ function getDB() {
       estatus TEXT DEFAULT 'en_proceso',
       categoria TEXT,
       mes TEXT,
+      sheet_url TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )
   `);
+
+  // Migration for existing databases
+  try {
+    _db.exec(`ALTER TABLE gastos ADD COLUMN sheet_url TEXT`);
+    console.log('✅ [DB] Migración: Columna sheet_url añadida.');
+  } catch (err) {
+    // Column already exists or other error
+  }
   
   return { type: 'sqlite', client: _db };
 }
@@ -164,16 +173,16 @@ router.post('/', async (req, res) => {
   try {
     if (db.type === 'supabase') {
       const { data, error } = await db.client.from('gastos').insert([{
-        uuid, proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria, mes
+        uuid, proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria, mes, sheet_url: req.body.sheet_url
       }]).select().single();
       if (error) throw error;
       return res.json({ ok: true, gasto: data });
     } else {
       const id = uuidv4();
       db.client.prepare(`
-        INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0, concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS', mes);
+        INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0, concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS', mes, req.body.sheet_url || '');
       const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
       return res.json({ ok: true, gasto: row });
     }
@@ -205,13 +214,15 @@ router.put('/:id', async (req, res) => {
       db.client.prepare(`
         UPDATE gastos SET
           proveedor = ?, folio = ?, fecha_factura = ?, monto = ?,
-          concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?
+          concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?, sheet_url = ?
         WHERE id = ?
       `).run(
         proveedor || existing.proveedor, folio || existing.folio, fechaFactura || existing.fecha_factura,
         monto !== undefined ? monto : existing.monto, concepto || existing.concepto,
         fechaSolicitud || existing.fecha_solicitud, estatus || existing.estatus,
-        categoria || existing.categoria, mes || existing.mes, id
+        categoria || existing.categoria, mes || existing.mes, 
+        req.body.sheet_url !== undefined ? req.body.sheet_url : existing.sheet_url,
+        id
       );
       const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
       return res.json({ ok: true, gasto: row });

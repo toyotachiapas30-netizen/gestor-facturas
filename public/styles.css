@@ -18,8 +18,8 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 /* ── BG ───────────────────────────── */
-body { font-family:'Inter',sans-serif; background: url('fondo.jpg') center center / cover fixed no-repeat; color:var(--text); min-height:100vh; }
-.bg { position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background: rgba(255,255,255,0.30); backdrop-filter: blur(2px); }
+body { font-family:'Inter',sans-serif; background: url('hero_bg.jpg') center center / cover fixed no-repeat; color:var(--text); min-height:100vh; }
+.bg { position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; background: rgba(255,255,255,0.45); }
 .orb { display: none; }
 
 /* ── Layout ───────────────────────── */
@@ -35,7 +35,7 @@ h1 { font-size:clamp(26px,5vw,38px); font-weight:800; letter-spacing:-1px; color
 header p { color:var(--text-sub); font-size:15px; }
 
 /* ── Main Navigation Tabs ─────────── */
-.main-tabs { display:flex; gap:4px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:5px; margin-bottom:28px; backdrop-filter:blur(20px); }
+.main-tabs { display:flex; gap:4px; background:rgba(255, 255, 255, 0.9); border:1px solid var(--border); border-radius:var(--r); padding:5px; margin-bottom:28px; }
 .main-tab {
   flex:1; padding:14px 20px; border:none; border-radius:12px; cursor:pointer;
   font-family:inherit; font-size:14px; font-weight:600; color:var(--text-sub);
@@ -64,7 +64,7 @@ header p { color:var(--text-sub); font-size:15px; }
 .dot.done   { background:var(--success); border-color:var(--success); }
 
 /* ── Card ─────────────────────────── */
-.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:28px; backdrop-filter:blur(20px); margin-bottom:20px; }
+.card { background:rgba(255, 255, 255, 0.9); border:1px solid var(--border); border-radius:var(--r); padding:28px; margin-bottom:20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
 .card.hidden { display:none; }
 
 /* ── Section ──────────────────────── */

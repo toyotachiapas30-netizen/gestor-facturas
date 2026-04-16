@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Gestor de Facturas — Farrera Autotec</title>
   <meta name="description" content="Flujo completo de procesamiento de facturas: SAT, Drive, Autotec, Mail, Contrarecibo y Control de Gastos."/>
-  <link rel="stylesheet" href="styles.css"/>
+  <link rel="stylesheet" href="styles.css?v=v3"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 </head>
@@ -53,14 +53,14 @@
         <span class="step-label" id="lbl-0">1. Archivos</span>
         <span class="step-label" id="lbl-1">2. SAT</span>
         <span class="step-label" id="lbl-2">3. Drive</span>
-        <span class="step-label" id="lbl-6">4. Contrarec.</span>
+        <span class="step-label" id="lbl-3">4. Contrarec.</span>
       </div>
       <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:25%"></div></div>
       <div class="step-dots">
         <div class="dot active" id="dot-0"></div>
         <div class="dot" id="dot-1"></div>
         <div class="dot" id="dot-2"></div>
-        <div class="dot" id="dot-6"></div>
+        <div class="dot" id="dot-3"></div>
       </div>
     </div>
 
@@ -230,9 +230,9 @@
 <!-- Pasos 5 y 6 eliminados a petición del usuario -->
 
     <!-- ══════════════════════════════════════════
-         PASO 7 — Contrarecibo Google Sheets
+         PASO 4 — Contrarecibo Google Sheets
     ═══════════════════════════════════════════ -->
-    <div class="step-panel" id="step-6">
+    <div class="step-panel" id="step-3">
       <div class="card">
         <div class="sec-title">📊 Paso 4 — Contrarecibo</div>
         <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px;">Busca el archivo de Contrarecibo en Google Drive por nombre (ej: SEFESO). Si no aparece, escribe el nombre completo del archivo.</p>
@@ -285,7 +285,7 @@
         <div class="alert err" id="err-step6"><span>⚠️</span><span id="err-step6-msg"></span></div>
 
         <div class="btn-row">
-          <button class="btn btn-outline" onclick="goTo(3)">← Atrás</button>
+          <button class="btn btn-outline" onclick="goTo(2)">← Atrás</button>
           <button class="btn btn-primary" id="btn-sheets" onclick="previewSheet()">👁️ Vista Previa</button>
           <button class="btn btn-success" id="btn-sheets-fill" style="display:none" onclick="llenarSheet()"><span class="spin" id="spin-sheets" style="display:none"></span>📊 Llenar y Imprimir</button>
         </div>
@@ -390,6 +390,7 @@
                 <th>Fecha Sol.</th>
                 <th>Estatus</th>
                 <th>Categoría</th>
+                <th>Sheet</th>
                 <th></th>
               </tr>
             </thead>
@@ -477,6 +478,10 @@
           <option value="">— Selecciona —</option>
         </select>
       </div>
+      <div class="field full">
+        <label>Enlace Contrarecibo (Google Sheets)</label>
+        <input type="text" id="gf-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/...">
+      </div>
     </div>
 
     <div class="alert err" id="err-gasto-form"><span>⚠️</span><span id="err-gasto-form-msg"></span></div>
@@ -491,6 +496,6 @@
 <!-- ══ Scripts ══════════════════ -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=v3"></script>
 </body>
 </html>

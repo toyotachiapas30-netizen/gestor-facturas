@@ -18,7 +18,7 @@ const state = {
 };
 
 const TOTAL_STEPS = 4; // Archivos, SAT, Drive, Contrarecibo
-const STEP_MAP = [0, 1, 2, 6]; // Mapping of logical index to HTML element IDs
+const STEP_MAP = [0, 1, 2, 3]; // Mapping of logical index to HTML element IDs
 
 const CATEGORIAS = [
   'NORMATIVAS',
@@ -60,7 +60,7 @@ function handleFilePick(file, tagId, nameId, key) {
 setupDrop('dz-xml', 'inp-xml', 'tag-xml', 'name-xml', 'xmlFile');
 setupDrop('dz-pdf', 'inp-pdf', 'tag-pdf', 'name-pdf', 'pdfFile');
 
-// Initialize Category Select options
+// Initialize UI and State
 document.addEventListener('DOMContentLoaded', () => {
   const catSel = document.getElementById('inp-categoria');
   if (catSel) {
@@ -70,6 +70,16 @@ document.addEventListener('DOMContentLoaded', () => {
       o.textContent = c;
       if (c === 'OTROS') o.selected = true;
       catSel.appendChild(o);
+    });
+  }
+
+  // Sync Branch selection
+  const sucSel = document.getElementById('inp-sucursal');
+  if (sucSel) {
+    state.sucursalFolderId = sucSel.value;
+    sucSel.addEventListener('change', e => {
+      state.sucursalFolderId = e.target.value;
+      console.log('Sucursal cambiada:', state.sucursalFolderId);
     });
   }
 });
@@ -130,6 +140,9 @@ function goStep1() {
     const parsed = parseCFDI(e.target.result);
     if (!parsed) return showErr('err-step0', 'El XML no es un CFDI válido o no tiene Timbre Fiscal Digital.');
 
+    // Save sucursal to state just in case
+    state.sucursalFolderId = sucursalSel.value;
+    
     // ── Check UUID duplication ──
     try {
       const res = await fetch(`/api/gastos/check/${parsed.uuid}`);
@@ -322,6 +335,7 @@ async function subirDrive() {
   fd.append('xml', state.xmlFile);
   fd.append('pdf', state.pdfFile);
   fd.append('proveedorNombre', proveedor);
+  if (state.sucursalFolderId) fd.append('parentFolderId', state.sucursalFolderId);
 
   try {
     const r = await fetch('/api/drive/upload', { method:'POST', body:fd });
@@ -500,7 +514,7 @@ async function llenarSheet() {
 
     // Auto-register as expense
     const categoria = document.getElementById('inp-categoria').value || 'OTROS';
-    await autoRegistrarGasto(concepto, categoria);
+    await autoRegistrarGasto(concepto, categoria, data.sheetUrl);
 
     document.getElementById('final-success').style.display='block';
   } catch(err) {
@@ -511,7 +525,7 @@ async function llenarSheet() {
 }
 
 // Auto-register expense at the end of the flow
-async function autoRegistrarGasto(concepto, categoria) {
+async function autoRegistrarGasto(concepto, categoria, sheetUrl) {
   if (!state.cfdi) return;
   const c = state.cfdi;
   const fechaFactura = c.fecha ? c.fecha.substring(0, 10) : '';
@@ -529,7 +543,8 @@ async function autoRegistrarGasto(concepto, categoria) {
         concepto: concepto || c.concepto || '',
         fechaSolicitud: hoy,
         estatus: 'en_proceso',
-        categoria: categoria || 'OTROS'
+        categoria: categoria || 'OTROS',
+        sheet_url: sheetUrl || ''
       })
     });
   } catch (err) {
@@ -638,6 +653,9 @@ async function loadGastos() {
         <td class="monto-cell" style="font-weight:600;color:var(--primary);">${fmtMonto(String(g.monto), 'MXN')}</td>
         <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(g.concepto)}">${escHtml(g.concepto)}</td>
         <td style="white-space:nowrap;">${fmtShortDate(g.fecha_solicitud)}</td>
+        <td style="text-align:center;">
+          ${g.sheet_url ? `<a href="${g.sheet_url}" target="_blank" title="Ver Contrarecibo" style="font-size:16px;text-decoration:none;">📊</a>` : '—'}
+        </td>
         <td>
           <span class="estatus-tag ${g.estatus}" onclick="toggleEstatus('${g.id}','${g.estatus}')" style="cursor:pointer" title="Hacer clic para cambiar estado">
             <span class="estatus-dot"></span>
@@ -716,15 +734,18 @@ function escHtml(str) {
 }
 
 async function toggleEstatus(id, current) {
+  // One-click to 'pagado' if it's currently 'en_proceso'
   const newEstatus = current === 'en_proceso' ? 'pagado' : 'en_proceso';
   try {
     await fetch(`/api/gastos/${id}/estatus`, {
-      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ estatus: newEstatus })
     });
     loadGastos();
   } catch (err) {
     console.error('Toggle estatus error:', err);
+    alert('Error al cambiar estatus');
   }
 }
 
@@ -758,6 +779,7 @@ async function editGasto(id) {
     document.getElementById('gf-fecha-solicitud').value = gasto.fecha_solicitud || '';
     document.getElementById('gf-estatus').value = gasto.estatus || 'en_proceso';
     document.getElementById('gf-categoria').value = gasto.categoria || '';
+    document.getElementById('gf-sheet-url').value = gasto.sheet_url || '';
 
     document.getElementById('gastos-form-overlay').classList.add('open');
   } catch (err) {
@@ -776,6 +798,7 @@ function openGastoForm() {
   document.getElementById('gf-fecha-solicitud').value = new Date().toISOString().substring(0, 10);
   document.getElementById('gf-estatus').value = 'en_proceso';
   document.getElementById('gf-categoria').value = '';
+  document.getElementById('gf-sheet-url').value = '';
   hideErr('err-gasto-form');
   document.getElementById('gastos-form-overlay').classList.add('open');
 }
@@ -801,7 +824,8 @@ async function saveGasto() {
     concepto: document.getElementById('gf-concepto').value.trim(),
     fechaSolicitud: document.getElementById('gf-fecha-solicitud').value,
     estatus: document.getElementById('gf-estatus').value,
-    categoria: document.getElementById('gf-categoria').value
+    categoria: document.getElementById('gf-categoria').value,
+    sheet_url: document.getElementById('gf-sheet-url').value.trim()
   };
 
   setLoading('btn-save-gasto','spin-gasto',true);

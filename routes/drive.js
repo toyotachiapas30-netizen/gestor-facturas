@@ -89,11 +89,11 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async 
   const client = getAuthorizedClient();
   if (!client) return res.status(401).json({ ok: false, error: 'No autorizado con Google. Ve a Configuración.' });
 
-  const { proveedorNombre } = req.body;
+  const { proveedorNombre, parentFolderId } = req.body;
   if (!proveedorNombre) return res.status(400).json({ ok: false, error: 'Falta el nombre del proveedor' });
 
   const drive = getGoogle().drive({ version: 'v3', auth: client });
-  const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  const rootFolderId = parentFolderId || process.env.GOOGLE_DRIVE_FOLDER_ID;
 
   try {
     // 1. Search or create subfolder with provider name
