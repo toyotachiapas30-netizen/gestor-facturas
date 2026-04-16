@@ -281,6 +281,7 @@ async function verificarSAT() {
     // Auto-trigger print if requested (optional logic)
   } catch(err) {
     showErr('err-step1', 'No se pudo conectar: '+err.message);
+    document.getElementById('sat-badge').style.display='none';
   } finally {
     setLoading('btn-sat-verify','spin-sat',false);
   }

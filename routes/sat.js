@@ -52,7 +52,8 @@ router.post('/verificar', async (req, res) => {
     
     const response = await axios.post(SAT_URL, soap, {
       headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': SOAP_ACTION },
-      });
+      timeout: 15000
+    });
     
     console.log('📥 [SAT] Respuesta SOAP recibida');
     const satResult = await parseSoapResponse(response.data);
