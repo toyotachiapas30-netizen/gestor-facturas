@@ -275,12 +275,15 @@ router.get('/stats', async (req, res) => {
   try {
     const db = getDB();
     const rango = req.query.rango || 'todo';
+    const mesFiltro = req.query.mes || '';
     
     if (db.type === 'supabase') {
       const now = new Date();
       let query = db.client.from('gastos').select('monto, categoria, mes, fecha_factura');
       
-      if (rango === 'mes') {
+      if (mesFiltro) {
+        query = query.eq('mes', mesFiltro);
+      } else if (rango === 'mes') {
         query = query.eq('mes', now.toISOString().substring(0, 7));
       } else if (rango === 'trimestre') {
         const d = new Date(); d.setMonth(d.getMonth() - 2);
@@ -292,12 +295,12 @@ router.get('/stats', async (req, res) => {
       const { data: rows, error } = await query;
       if (error) throw error;
 
-      // Grouping logic in JS for simplicity (Supabase free tier SQL is limited)
       const monthlyObj = {};
       const byCategoryObj = {};
       
       rows.forEach(r => {
-        const label = (rango === 'mes') ? r.fecha_factura : r.mes;
+        // If filtering by specific month, use date as label for the bar chart
+        const label = (mesFiltro || rango === 'mes') ? r.fecha_factura : r.mes;
         monthlyObj[label] = (monthlyObj[label] || 0) + (r.monto || 0);
         byCategoryObj[r.categoria] = (byCategoryObj[r.categoria] || 0) + (r.monto || 0);
       });
@@ -313,7 +316,11 @@ router.get('/stats', async (req, res) => {
       let limit = 12;
 
       const now = new Date();
-      if (rango === 'mes') {
+      if (mesFiltro) {
+        dateFilter = `WHERE mes = '${mesFiltro}'`;
+        timeGroup = 'fecha_factura';
+        limit = 31;
+      } else if (rango === 'mes') {
         dateFilter = `WHERE mes = '${now.toISOString().substring(0, 7)}'`;
         timeGroup = 'fecha_factura';
         limit = 31;

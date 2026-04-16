@@ -161,7 +161,7 @@ header p { color:var(--text-sub); font-size:15px; }
   border:1px solid var(--border); 
   border-radius:16px; 
   padding:24px; 
-  min-height:350px; 
+  min-height:280px; 
   display: flex;
   flex-direction: column;
   box-shadow: 0 4px 20px rgba(0,0,0,0.04);
