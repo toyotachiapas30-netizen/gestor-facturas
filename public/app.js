@@ -60,6 +60,16 @@ function handleFilePick(file, tagId, nameId, key) {
 setupDrop('dz-xml', 'inp-xml', 'tag-xml', 'name-xml', 'xmlFile');
 setupDrop('dz-pdf', 'inp-pdf', 'tag-pdf', 'name-pdf', 'pdfFile');
 
+// Debug duplicate check directly
+async function debugDupeCheck(uuid) {
+  try {
+     const r = await fetch(`/api/gastos/check/${uuid}`);
+     const d = await r.json();
+     console.log('Dupe check for', uuid, ':', d);
+     return d.exists;
+  } catch(e) { console.error('Dupe check fetch error:', e); return false; }
+}
+
 // Register Chart.js Plugin
 if (window.ChartDataLabels) {
   Chart.register(ChartDataLabels);
@@ -334,7 +344,7 @@ async function subirDrive() {
   hideErr('err-step2');
   const proveedor = document.getElementById('inp-proveedor').value.trim();
   if (!proveedor) return showErr('err-step2', 'Escribe el nombre del proveedor.');
-  setLoading('btn-drive','spin-drive',true);
+  setLoading('btn-drive-upload','spin-drive',true);
 
   const fd = new FormData();
   fd.append('xml', state.xmlFile);
@@ -355,7 +365,7 @@ async function subirDrive() {
   } catch(err) {
     showErr('err-step2','Error: '+err.message);
   } finally {
-    setLoading('btn-drive','spin-drive',false);
+    setLoading('btn-drive-upload','spin-drive',false);
   }
 }
 
