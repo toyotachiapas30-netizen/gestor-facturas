@@ -151,7 +151,19 @@ header p { color:var(--text-sub); font-size:15px; }
 @media (max-width: 900px) {
   .chart-grid { grid-template-columns:1fr; }
 }
-.chart-container { background:#fff; border:1px solid var(--border); border-radius:var(--r); padding:20px; min-height:300px; }
+.chart-container { 
+  background:#fff; 
+  border:1px solid var(--border); 
+  border-radius:16px; 
+  padding:24px; 
+  min-height:350px; 
+  box-shadow: 0 4px 20px rgba(0,0,0,0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.chart-container:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+}
 .nav-btns { display:flex; justify-content:space-between; margin-top:24px; gap:12px; }
 
 /* ── Alert ────────────────────────── */
@@ -188,15 +200,20 @@ header p { color:var(--text-sub); font-size:15px; }
   display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:24px;
 }
 .summary-card {
-  background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm);
-  padding:18px; text-align:center; transition:transform .2s;
+  background:#ffffff; border:1px solid var(--border); border-radius:14px;
+  padding:20px; text-align:center; transition:all .3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
 }
-.summary-card:hover { transform:translateY(-2px); }
-.summary-card .sc-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.8px; color:var(--text-muted); margin-bottom:6px; }
-.summary-card .sc-value { font-size:24px; font-weight:700; }
-.summary-card .sc-value.total-val { background:linear-gradient(135deg,#60a5fa,#a78bfa); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
-.summary-card .sc-value.proceso-val { color:var(--warning); }
-.summary-card .sc-value.pagado-val  { color:var(--success); }
+.summary-card:hover { 
+  transform:translateY(-4px); 
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  border-color: var(--border-active);
+}
+.summary-card .sc-label { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:#64748b; margin-bottom:8px; }
+.summary-card .sc-value { font-size:26px; font-weight:800; color:#1e293b; }
+.summary-card .sc-value.total-val { color: var(--accent); }
+.summary-card .sc-value.proceso-val { color: var(--warning); }
+.summary-card .sc-value.pagado-val  { color: var(--success); }
 
 /* ── Gastos Table ─────────────────── */
 .gastos-table-wrap { overflow-x:auto; border-radius:var(--r); border:1px solid var(--border); }

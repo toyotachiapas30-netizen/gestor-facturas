@@ -762,12 +762,15 @@ function renderCharts(stats, rango) {
   if (chartBar) chartBar.destroy();
   if (chartPie) chartPie.destroy();
 
-  const textColor = '#475569';
-  const gridColor = 'rgba(0,0,0,0.05)';
-  const colors = ['#eb0a1e', '#1e293b', '#f59e0b', '#0ea5e9', '#8b5cf6', '#10b981', '#f97316'];
+  const textColor = '#1e293b';
+  const gridColor = 'rgba(226, 232, 240, 0.8)';
+  // Toyota Premium Palette: Deep Red, Slate, Muted Blue-Grey
+  const colors = ['#eb0a1e', '#1e293b', '#64748b', '#94a3b8', '#cbd5e1', '#f1f5f9', '#fee2e2'];
 
-  // 1. Bar Chart: Gastos por Categoría (Top 7)
+  // Slice to Top 7 for clarity
   const barData = stats.byCategory.slice(0, 7);
+
+  // 1. Horizontal Bar Chart (More readable for long names)
   chartBar = new Chart(ctxBar, {
     type: 'bar',
     data: {
@@ -776,7 +779,10 @@ function renderCharts(stats, rango) {
         label: 'Monto Total',
         data: barData.map(c => c.total),
         backgroundColor: colors,
-        borderRadius: 8
+        borderColor: colors.map(c => c),
+        borderWidth: 0,
+        borderRadius: 6,
+        barThickness: 24,
       }]
     },
     options: {
@@ -785,18 +791,36 @@ function renderCharts(stats, rango) {
       indexAxis: 'y',
       plugins: {
         legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1e293b',
+          titleFont: { size: 13, weight: 'bold' },
+          bodyFont: { size: 13 },
+          padding: 12,
+          cornerRadius: 8,
+          callbacks: {
+            label: (ctx) => ' ' + new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN'}).format(ctx.raw)
+          }
+        },
         datalabels: {
           anchor: 'end',
           align: 'right',
-          color: textColor,
-          font: { weight: 'bold', size: 10 },
-          formatter: (v) => fmtMonto(v, 'MXN')
+          offset: 8,
+          color: '#475569',
+          font: { weight: '700', size: 11, family: "'Inter', sans-serif" },
+          formatter: (v) => new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN', maximumFractionDigits: 0}).format(v)
         }
       },
       scales: {
-        x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 } } },
-        y: { grid: { display: false }, ticks: { color: textColor, font: { size: 11, weight: '600' } } }
-      }
+        x: { 
+          grid: { color: gridColor, drawBorder: false }, 
+          ticks: { color: '#64748b', font: { size: 10 } } 
+        },
+        y: { 
+          grid: { display: false }, 
+          ticks: { color: textColor, font: { size: 12, weight: '600' } } 
+        }
+      },
+      layout: { padding: { right: 50 } }
     }
   });
 
@@ -808,18 +832,42 @@ function renderCharts(stats, rango) {
       datasets: [{
         data: barData.map(c => c.total),
         backgroundColor: colors,
-        borderWidth: 2,
-        borderColor: '#fff'
+        hoverOffset: 15,
+        borderWidth: 3,
+        borderColor: '#ffffff'
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      cutout: '65%',
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+        legend: { 
+          position: 'bottom', 
+          labels: { 
+            usePointStyle: true,
+            pointStyle: 'circle',
+            padding: 20,
+            font: { size: 11, weight: '500', family: "'Inter', sans-serif" },
+            color: '#475569'
+          } 
+        },
+        tooltip: {
+          backgroundColor: '#1e293b',
+          padding: 12,
+          cornerRadius: 8,
+          callbacks: {
+            label: (ctx) => {
+              const val = ctx.raw;
+              const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
+              const perc = ((val * 100) / sum).toFixed(1) + '%';
+              return ' ' + perc + ' (' + new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN'}).format(val) + ')';
+            }
+          }
+        },
         datalabels: {
-          color: '#fff',
-          font: { weight: 'bold', size: 9 },
+          color: (ctx) => ctx.dataset.backgroundColor[ctx.dataIndex] === '#f1f5f9' ? '#1e293b' : '#fff',
+          font: { weight: '800', size: 11 },
           formatter: (value, ctx) => {
             const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
             const percentage = (value * 100 / sum).toFixed(0) + "%";
@@ -828,7 +876,7 @@ function renderCharts(stats, rango) {
         }
       }
     }
-  });
+  } );
 }
 
 function escHtml(str) {
