@@ -327,7 +327,17 @@
       <div class="sec-title">📋 Control de Gastos</div>
 
       <!-- Summary cards -->
-      <div class="gastos-summary" id="gastos-summary">
+      <!-- Statistics Chart -->
+      <div class="gastos-charts" style="display:block; margin-top:10px;">
+        <div class="chart-card" style="min-height:300px; width:100%;">
+          <div class="sec-title" style="font-size:14px;margin-bottom:15px;color:var(--primary);font-weight:700;">📊 Distribución de Gastos por Categoría</div>
+          <div style="height:250px; position:relative;">
+            <canvas id="chart-dist"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="gastos-summary" id="gastos-summary" style="margin-top:20px;">
         <div class="summary-card">
           <div class="sc-label">Total Registros</div>
           <div class="sc-value" id="gs-count">0</div>
@@ -343,29 +353,6 @@
         <div class="summary-card">
           <div class="sc-label">Pagados</div>
           <div class="sc-value pagado-val" id="gs-pagados">0</div>
-        </div>
-      </div>
-      
-      <!-- Statistics Charts -->
-      <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:20px;">
-        <h3 style="margin:0; font-size:16px; color:var(--text-main);">Visión General de Gastos</h3>
-        <div class="field" style="margin:0; min-width:200px;">
-          <select id="filter-rango" onchange="loadStats()" style="padding: 6px 12px; margin: 0; background: #fff; color: #1e293b;">
-            <option value="30">Últimos 30 días</option>
-            <option value="90">Últimos 90 días</option>
-            <option value="365">Año actual</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="gastos-charts">
-        <div class="chart-card">
-          <div class="sec-title" style="font-size:14px;margin-bottom:10px;">📈 Monto Total por Mes</div>
-          <canvas id="chart-anual"></canvas>
-        </div>
-        <div class="chart-card">
-          <div class="sec-title" style="font-size:14px;margin-bottom:10px;">🍩 Distribución por Categoría</div>
-          <canvas id="chart-pie-cat"></canvas>
         </div>
       </div>
 

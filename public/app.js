@@ -752,119 +752,84 @@ async function loadGastos() {
   }
 }
 
-let chartBar = null;
-let chartPie = null;
+let chartDist = null;
 
 function renderCharts(stats, rango) {
-  const ctxBar = document.getElementById('chart-anual').getContext('2d');
-  const ctxPie = document.getElementById('chart-pie-cat').getContext('2d');
+  const canvasDist = document.getElementById('chart-dist');
+  if (!canvasDist) return;
+  const ctxDist = canvasDist.getContext('2d');
 
-  if (chartBar) chartBar.destroy();
-  if (chartPie) chartPie.destroy();
+  if (chartDist) chartDist.destroy();
 
   const textColor = '#1e293b';
   const gridColor = 'rgba(226, 232, 240, 0.8)';
   
-  // Professional "Non-Alarming" Palette: Blues, Slate, Soft Grays
-  const palette = ['#3b82f6', '#1e293b', '#64748b', '#94a3b8', '#cbd5e1', '#f1f5f9', '#93c5fd', '#d1d5db'];
+  // High-Contrast Toyota Branding Palette
+  const palette = ['#eb0a1e', '#1e293b', '#64748b', '#94a3b8', '#cbd5e1', '#000000'];
 
-  // 1. Bar Chart: Gastos Mensuales (Trends)
-  const monthlyData = stats.monthly || [];
-  chartBar = new Chart(ctxBar, {
+  const catData = stats.byCategory || [];
+
+  chartDist = new Chart(ctxDist, {
     type: 'bar',
     data: {
-      labels: monthlyData.map(m => m.label),
+      labels: catData.map(c => c.categoria),
       datasets: [{
-        label: 'Gasto Total',
-        data: monthlyData.map(m => m.total),
-        backgroundColor: '#3b82f6',
+        label: 'Monto Total',
+        data: catData.map(c => c.total),
+        backgroundColor: palette,
         borderRadius: 4,
-        barThickness: 'flex',
+        barThickness: 24,
         maxBarThickness: 32
       }]
     },
     options: {
+      indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      layout: {
+        padding: { left: 10, right: 30, top: 0, bottom: 0 }
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
+          enabled: true,
+          mode: 'index',
+          intersect: false,
           backgroundColor: '#1e293b',
-          cornerRadius: 6,
-          padding: 10,
+          titleFont: { size: 13, weight: 'bold' },
+          bodyFont: { size: 13 },
+          padding: 12,
+          cornerRadius: 8,
           callbacks: {
             label: (ctx) => ' ' + new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN'}).format(ctx.raw)
           }
         },
         datalabels: { display: false }
       },
+      interaction: {
+        mode: 'nearest',
+        axis: 'y',
+        intersect: false
+      },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
-        y: { 
+        x: { 
           grid: { color: gridColor, drawBorder: false }, 
           ticks: { 
             color: '#64748b', 
             font: { size: 10 },
             callback: (v) => '$' + v.toLocaleString()
           } 
-        }
-      }
-    }
-  });
-
-  // 2. Pie Chart: Distribución por Categoría (With Percentages)
-  const catData = stats.byCategory || [];
-  chartPie = new Chart(ctxPie, {
-    type: 'pie',
-    data: {
-      labels: catData.map(c => c.categoria),
-      datasets: [{
-        data: catData.map(c => c.total),
-        backgroundColor: palette,
-        hoverOffset: 10,
-        borderWidth: 1,
-        borderColor: '#ffffff'
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { 
-          position: 'right', 
-          labels: { 
-            boxWidth: 10,
-            usePointStyle: true,
-            padding: 12,
-            font: { size: 10, weight: '500' },
-            color: '#475569'
-          } 
         },
-        tooltip: {
-          backgroundColor: '#1e293b',
-          cornerRadius: 6,
-          padding: 10,
-          callbacks: {
-            label: (ctx) => {
-              const val = ctx.raw;
-              const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
-              const perc = ((val * 100) / sum).toFixed(1) + '%';
-              return ` ${perc} (${new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN'}).format(val)})`;
+        y: { 
+          grid: { display: false }, 
+          ticks: { 
+            color: '#1e293b', 
+            font: { size: 11, weight: '600' },
+            callback: function(value) {
+              const label = this.getLabelForValue(value);
+              return label.length > 25 ? label.substring(0, 22) + '...' : label;
             }
-          }
-        },
-        datalabels: {
-          display: (ctx) => {
-            const val = ctx.dataset.data[ctx.dataIndex];
-            const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
-            return (val * 100 / sum) > 5; // Only show if > 5%
-          },
-          color: '#fff',
-          font: { weight: '700', size: 10 },
-          formatter: (val, ctx) => {
-            const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
-            return ((val * 100) / sum).toFixed(0) + '%';
-          }
+          } 
         }
       }
     }

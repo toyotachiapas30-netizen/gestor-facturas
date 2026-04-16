@@ -148,13 +148,11 @@ header p { color:var(--text-sub); font-size:15px; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 /* ── Charts ───────────────────────── */
 .gastos-charts { 
-  display:grid; 
-  grid-template-columns: 1fr 1fr; 
-  gap:20px; 
+  display:block;
   margin-top:20px; 
 }
 @media (max-width: 900px) {
-  .gastos-charts { grid-template-columns:1fr; }
+  .gastos-charts { width: 100%; }
 }
 .chart-card { 
   background:#fff; 
