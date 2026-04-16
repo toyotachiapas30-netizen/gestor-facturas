@@ -540,7 +540,8 @@ async function llenarSheet() {
     const categoria = document.getElementById('inp-categoria').value || 'OTROS';
     await autoRegistrarGasto(concepto, categoria, data.sheetUrl);
 
-    document.getElementById('final-success').style.display='block';
+    document.getElementById('final-success').style.display='flex';
+    document.getElementById('btn-sheets-fill').style.display='none';
   } catch(err) {
     showErr('err-step6','Error: '+err.message);
   } finally {
@@ -626,6 +627,8 @@ function resetFlow() {
   document.getElementById('drive-result').style.display = 'none';
   document.getElementById('sheet-preview').style.display = 'none';
   document.getElementById('sheets-result').style.display = 'none';
+  document.getElementById('final-success').style.display = 'none';
+  document.getElementById('btn-sheets-fill').style.display = 'none';
   
   // Back to start
   goTo(0);
