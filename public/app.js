@@ -802,12 +802,7 @@ function renderCharts(stats, rango) {
           }
         },
         datalabels: {
-          anchor: 'end',
-          align: 'right',
-          offset: 8,
-          color: '#475569',
-          font: { weight: '700', size: 11, family: "'Inter', sans-serif" },
-          formatter: (v) => new Intl.NumberFormat('es-MX', {style:'currency', currency:'MXN', maximumFractionDigits: 0}).format(v)
+          display: false
         }
       },
       scales: {
@@ -866,13 +861,7 @@ function renderCharts(stats, rango) {
           }
         },
         datalabels: {
-          color: (ctx) => ctx.dataset.backgroundColor[ctx.dataIndex] === '#f1f5f9' ? '#1e293b' : '#fff',
-          font: { weight: '800', size: 11 },
-          formatter: (value, ctx) => {
-            const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
-            const percentage = (value * 100 / sum).toFixed(0) + "%";
-            return percentage !== '0%' ? percentage : '';
-          }
+          display: false
         }
       }
     }
