@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="styles.css?v=v3"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 </head>
 <body>
 
@@ -50,17 +52,17 @@
     <!-- Progress -->
     <div class="progress-wrap">
       <div class="step-labels">
-        <span class="step-label" id="lbl-0">1. Archivos</span>
-        <span class="step-label" id="lbl-1">2. SAT</span>
-        <span class="step-label" id="lbl-2">3. Drive</span>
-        <span class="step-label" id="lbl-3">4. Contrarec.</span>
+        <span class="step-label" id="lbl-0" onclick="goTo(0)" style="cursor:pointer">1. Archivos</span>
+        <span class="step-label" id="lbl-1" onclick="goTo(1)" style="cursor:pointer">2. SAT</span>
+        <span class="step-label" id="lbl-2" onclick="goTo(2)" style="cursor:pointer">3. Drive</span>
+        <span class="step-label" id="lbl-3" onclick="goTo(3)" style="cursor:pointer">4. Contrarec.</span>
       </div>
       <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:25%"></div></div>
       <div class="step-dots">
-        <div class="dot active" id="dot-0"></div>
-        <div class="dot" id="dot-1"></div>
-        <div class="dot" id="dot-2"></div>
-        <div class="dot" id="dot-3"></div>
+        <div class="dot active" id="dot-0" onclick="goTo(0)" style="cursor:pointer"></div>
+        <div class="dot" id="dot-1" onclick="goTo(1)" style="cursor:pointer"></div>
+        <div class="dot" id="dot-2" onclick="goTo(2)" style="cursor:pointer"></div>
+        <div class="dot" id="dot-3" onclick="goTo(3)" style="cursor:pointer"></div>
       </div>
     </div>
 
@@ -183,10 +185,13 @@
            </div>
         </div>
 
-        <div class="btn-row">
-          <button class="btn btn-outline" onclick="goTo(0)">← Atrás</button>
-          <button class="btn btn-primary" id="btn-sat-verify" onclick="verificarSAT()"><span class="spin" id="spin-sat" style="display:none"></span>🔍 Verificar en SAT</button>
-          <button class="btn btn-success" id="btn-print-sat" style="display:none" onclick="imprimirSAT()"><span class="spin" id="spin-print-sat" style="display:none"></span>🖨️ Imprimir desde SAT</button>
+        <br/>
+        <div style="display:flex; justify-content:space-between;">
+           <button class="btn btn-secondary" onclick="goTo(0)">← Volver</button>
+           <button class="btn btn-primary" id="btn-sat-verify" onclick="verificarSAT()">
+             <span class="spinner" id="spin-sat"></span> Verificar en SAT
+           </button>
+           <button class="btn btn-success" id="btn-print-sat" style="display:none" onclick="imprimirSAT()"><span class="spin" id="spin-print-sat" style="display:none"></span>🖨️ Imprimir desde SAT</button>
         </div>
         <div class="nav-btns"><div></div>
           <button class="btn btn-primary" id="btn-next1" disabled onclick="goTo(2)">Subir a Drive →</button>
@@ -215,11 +220,17 @@
           <a id="drive-link" href="#" target="_blank" class="btn btn-outline" style="margin-top:10px;text-decoration:none;display:inline-flex;">📁 Abrir carpeta en Drive</a>
         </div>
 
-        <div class="alert err" id="err-step2"><span>⚠️</span><span id="err-step2-msg"></span></div>
+        <div class="alert success" id="drive-result" style="display:none; margin-top:20px;">
+          <span>✅</span>
+          <div><b>Archivos subidos con éxito</b><ul id="drive-links" style="margin-top:8px;padding-left:18px;"></ul></div>
+        </div>
 
-        <div class="btn-row">
-          <button class="btn btn-outline" onclick="goTo(1)">← Atrás</button>
-          <button class="btn btn-primary" id="btn-drive" onclick="subirDrive()"><span class="spin" id="spin-drive" style="display:none"></span>☁️ Subir a Drive</button>
+        <br/>
+        <div style="display:flex; justify-content:space-between;">
+          <button class="btn btn-secondary" onclick="goTo(1)">← Volver</button>
+          <button class="btn btn-primary" id="btn-drive-upload" onclick="subirDrive()">
+            <span class="spinner" id="spin-drive"></span> Subir a Drive
+          </button>
         </div>
         <div class="nav-btns"><div></div>
           <button class="btn btn-primary" id="btn-next2" disabled onclick="goTo(3)">Llenar Contrarecibo →</button>
@@ -227,17 +238,21 @@
       </div>
     </div>
 
-<!-- Pasos 5 y 6 eliminados a petición del usuario -->
-
     <!-- ══════════════════════════════════════════
          PASO 4 — Contrarecibo Google Sheets
     ═══════════════════════════════════════════ -->
     <div class="step-panel" id="step-3">
       <div class="card">
-        <div class="sec-title">📊 Paso 4 — Contrarecibo</div>
-        <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px;">Busca el archivo de Contrarecibo en Google Drive por nombre (ej: SEFESO). Si no aparece, escribe el nombre completo del archivo.</p>
-
-        <div class="field">
+        <div class="sec-title">📑 Paso 4 — Contrarecibo</div>
+        
+        <p style="font-size:13px;color:var(--text-sub);margin-bottom:14px;">Genera el contrarecibo automático en Google Sheets.</p>
+        
+        <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+          <button class="btn btn-secondary" onclick="goTo(2)">← Volver</button>
+          <button class="btn btn-primary" id="btn-sheets-preview" onclick="previewSheet()" style="background:#1e293b">👁️ Previsualizar</button>
+        </div>
+        
+        <div id="sheet-preview" style="display:none; margin-top:24px;">
           <label>Nombre del Proveedor (para buscar en Drive)</label>
           <input type="text" id="inp-proveedor-sheet" placeholder="Ej: SEFESO" oninput="debounceBuscarSheet()"/>
           <div id="sheet-search-status" style="font-size:12px;color:var(--text-muted);margin-top:4px;"></div>
@@ -264,17 +279,6 @@
           </select>
         </div>
 
-        <!-- Preview of what will be filled -->
-        <div id="sheet-preview" style="display:none">
-          <div class="sec-title" style="margin-top:4px">Vista previa de datos a llenar</div>
-          <div class="cfdi-grid" style="grid-template-columns:repeat(2,1fr)">
-            <div class="cfield"><div class="clabel">D40 — No. Fact/Rbo.</div><div class="cval" id="prev-nofact">—</div></div>
-            <div class="cfield"><div class="clabel">I40 — Fecha</div><div class="cval" id="prev-fecha">—</div></div>
-            <div class="cfield"><div class="clabel">J40 — Importe</div><div class="cval total" id="prev-importe">—</div></div>
-            <div class="cfield"><div class="clabel">L40 — Concepto</div><div class="cval" id="prev-concepto">—</div></div>
-          </div>
-        </div>
-
         <div id="sheets-result" style="display:none">
           <div class="badge vigente">
             <div class="badge-icon">✅</div>
@@ -285,20 +289,20 @@
         <div class="alert err" id="err-step6"><span>⚠️</span><span id="err-step6-msg"></span></div>
 
         <div class="btn-row">
-          <button class="btn btn-outline" onclick="goTo(2)">← Atrás</button>
-          <button class="btn btn-primary" id="btn-sheets" onclick="previewSheet()">👁️ Vista Previa</button>
-          <button class="btn btn-success" id="btn-sheets-fill" style="display:none" onclick="llenarSheet()"><span class="spin" id="spin-sheets" style="display:none"></span>📊 Llenar y Imprimir</button>
+          <button class="btn btn-primary" id="btn-sheets-fill" style="display:none" onclick="llenarSheet()"><span class="spin" id="spin-sheets" style="display:none"></span>📊 Llenar y Imprimir</button>
         </div>
 
         <!-- Final success -->
-        <div id="final-success" style="display:none;margin-top:24px;text-align:center">
-          <div style="font-size:56px;margin-bottom:12px">🎉</div>
-          <div style="font-size:22px;font-weight:700;margin-bottom:8px">¡Flujo completado!</div>
-          <div style="font-size:14px;color:var(--text-sub);margin-bottom:20px">Todos los pasos de la factura han sido procesados exitosamente.</div>
-          <button class="btn btn-primary" onclick="resetAll()">🔄 Procesar otra factura</button>
+          <div class="row" style="margin-top:40px; justify-content:center;">
+            <div style="text-align:center;">
+              <div style="font-size:50px;margin-bottom:20px;">🎉</div>
+              <h2 style="margin-bottom:8px">¡Proceso Finalizado!</h2>
+              <p style="color:var(--text-sub);margin-bottom:32px">La factura ha sido validada, subida a Drive y registrada en Gastos.</p>
+              <button class="btn btn-primary" onclick="resetFlow()">🔄 Procesar otra factura</button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
 
   </div><!-- /view-facturas -->
 

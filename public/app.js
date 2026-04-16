@@ -60,6 +60,11 @@ function handleFilePick(file, tagId, nameId, key) {
 setupDrop('dz-xml', 'inp-xml', 'tag-xml', 'name-xml', 'xmlFile');
 setupDrop('dz-pdf', 'inp-pdf', 'tag-pdf', 'name-pdf', 'pdfFile');
 
+// Register Chart.js Plugin
+if (window.ChartDataLabels) {
+  Chart.register(ChartDataLabels);
+}
+
 // Initialize UI and State
 document.addEventListener('DOMContentLoaded', () => {
   const catSel = document.getElementById('inp-categoria');
@@ -148,11 +153,11 @@ function goStep1() {
       const res = await fetch(`/api/gastos/check/${parsed.uuid}`);
       const dbCheck = await res.json();
       if (dbCheck.exists) {
-        const proceed = window.confirm(`⚠️ ADVERTENCIA DE DUPLICIDAD\n\nEl sistema detectó que esta factura (UUID: ${parsed.uuid}) ya fue introducida anteriormente en el Control de Gastos.\n\n¿Estás seguro de que deseas continuar y procesarla (y pagarla) de nuevo?`);
+        const proceed = window.confirm(`⚠️ ADVERTENCIA DE DUPLICIDAD\n\nEl sistema detectó que esta factura (UUID: ${parsed.uuid}) ya fue introducida anteriormente en el Control de Gastos.\n\n¿Deseas continuar de todos modos? (Se creará un registro duplicado)`);
         if (!proceed) return;
       }
     } catch (err) {
-      console.warn('Network error checking UUID duplicates', err);
+      console.warn('Error al verificar duplicidad:', err);
     }
 
     state.cfdi = parsed;
@@ -581,6 +586,32 @@ async function authGoogle() {
   } catch(err) { alert('Error: '+err.message); }
 }
 
+function resetFlow() {
+  // Clear state
+  state.xmlFile = null;
+  state.pdfFile = null;
+  state.cfdi = null;
+  state.satOk = false;
+  state.driveOk = false;
+
+  // Clear inputs
+  document.getElementById('inp-xml').value = '';
+  document.getElementById('inp-pdf').value = '';
+  document.getElementById('name-xml').textContent = '—';
+  document.getElementById('name-pdf').textContent = '—';
+  document.getElementById('tag-xml').classList.remove('show');
+  document.getElementById('tag-pdf').classList.remove('show');
+  
+  // Clear results
+  document.getElementById('sat-badge').style.display = 'none';
+  document.getElementById('drive-result').style.display = 'none';
+  document.getElementById('sheet-preview').style.display = 'none';
+  document.getElementById('sheets-result').style.display = 'none';
+  
+  // Back to start
+  goTo(0);
+}
+
 // ── Formatting ────────────────────────────────────────────────────────────────
 function fmtFecha(f) {
   if (!f||f==='—') return '—';
@@ -679,50 +710,80 @@ async function loadGastos() {
   }
 }
 
-let chartMensual = null;
-let chartAnual = null;
-
-async function loadStats() {
-  try {
-    const rango = document.getElementById('chart-filter-rango')?.value || 'todo';
-    const r = await fetch(`/api/gastos/stats?rango=${rango}`);
-    const data = await r.json();
-    if (!data.ok) return;
-
-    renderCharts(data.stats, rango);
-  } catch (err) {
-    console.error('Stats error:', err);
-  }
-}
+let chartBar = null;
+let chartPie = null;
 
 function renderCharts(stats, rango) {
-  const ctxA = document.getElementById('chart-anual').getContext('2d');
+  const ctxBar = document.getElementById('chart-anual').getContext('2d');
+  const ctxPie = document.getElementById('chart-pie-cat').getContext('2d');
 
-  if (chartAnual) chartAnual.destroy();
+  if (chartBar) chartBar.destroy();
+  if (chartPie) chartPie.destroy();
 
-  // Color config for Light Theme
   const textColor = '#475569';
   const gridColor = 'rgba(0,0,0,0.05)';
+  const colors = ['#eb0a1e', '#1e293b', '#f59e0b', '#0ea5e9', '#8b5cf6', '#10b981', '#f97316'];
 
-  // Category Chart matches styling of the old layout
-  chartAnual = new Chart(ctxA, {
+  // 1. Bar Chart: Gastos por Categoría (Top 7)
+  const barData = stats.byCategory.slice(0, 7);
+  chartBar = new Chart(ctxBar, {
     type: 'bar',
     data: {
-      labels: stats.byCategory.slice(0, 5).map(c => c.categoria),
+      labels: barData.map(c => c.categoria),
       datasets: [{
-        label: 'Gasto por Categoría ($)',
-        data: stats.byCategory.slice(0, 5).map(c => c.total),
-        backgroundColor: ['#eb0a1e', '#1e293b', '#f59e0b', '#0ea5e9', '#8b5cf6'], // Toyota colors
-        borderRadius: 6
+        label: 'Monto Total',
+        data: barData.map(c => c.total),
+        backgroundColor: colors,
+        borderRadius: 8
       }]
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       indexAxis: 'y',
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          anchor: 'end',
+          align: 'right',
+          color: textColor,
+          font: { weight: 'bold', size: 10 },
+          formatter: (v) => fmtMonto(v, 'MXN')
+        }
+      },
       scales: {
-        x: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor } },
-        y: { grid: { display: false }, ticks: { color: textColor } }
+        x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 } } },
+        y: { grid: { display: false }, ticks: { color: textColor, font: { size: 11, weight: '600' } } }
+      }
+    }
+  });
+
+  // 2. Pie Chart: Distribución porcentual
+  chartPie = new Chart(ctxPie, {
+    type: 'doughnut',
+    data: {
+      labels: barData.map(c => c.categoria),
+      datasets: [{
+        data: barData.map(c => c.total),
+        backgroundColor: colors,
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+        datalabels: {
+          color: '#fff',
+          font: { weight: 'bold', size: 9 },
+          formatter: (value, ctx) => {
+            const sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
+            const percentage = (value * 100 / sum).toFixed(0) + "%";
+            return percentage !== '0%' ? percentage : '';
+          }
+        }
       }
     }
   });

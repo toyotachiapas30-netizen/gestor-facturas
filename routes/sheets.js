@@ -107,8 +107,25 @@ router.post('/llenar', async (req, res) => {
       }
     });
 
+    // ── Backup Copy ──────────────────────────────────
+    const DRIVE_BACKUP_FOLDER = '1xLYLOfX581ZV7irORRVDP8JxhS4KTkks';
+    try {
+      const drive = getGoogle().drive({ version: 'v3', auth: client });
+      await drive.files.copy({
+        fileId: sheetId,
+        requestBody: {
+          name: `Respaldo - ${noFact} - ${new Date().toISOString().split('T')[0]}`,
+          parents: [DRIVE_BACKUP_FOLDER]
+        }
+      });
+      console.log('✅ Respaldo de contrarecibo creado en Drive');
+    } catch (copyErr) {
+      console.error('Error al crear respaldo:', copyErr.message);
+      // Don't fail the whole request if only backup fails
+    }
+
     const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}`;
-    return res.json({ ok: true, sheetUrl, mensaje: 'Contrarecibo llenado correctamente' });
+    return res.json({ ok: true, sheetUrl, mensaje: 'Contrarecibo llenado correctamente y respaldado' });
   } catch (err) {
     console.error('Sheets error:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
