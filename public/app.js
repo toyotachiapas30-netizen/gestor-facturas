@@ -100,8 +100,17 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Helpers: UI ───────────────────────────────────────────────────────────────
-function showErr(id, msg) { const el=document.getElementById(id); el.classList.add('show'); el.querySelector('span:last-child').textContent=msg; }
-function hideErr(id) { document.getElementById(id).classList.remove('show'); }
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return console.warn('showErr: element not found', id);
+  el.classList.add('show');
+  const msgEl = el.querySelector('span:last-child');
+  if (msgEl) msgEl.textContent = msg;
+}
+function hideErr(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('show');
+}
 function setLoading(btnId, spinId, loading) {
   const btn=document.getElementById(btnId), spin=document.getElementById(spinId);
   btn.disabled=loading; spin.style.display=loading?'inline-block':'none';

@@ -189,7 +189,7 @@
         <div style="display:flex; justify-content:space-between;">
            <button class="btn btn-secondary" onclick="goTo(0)">← Volver</button>
            <button class="btn btn-primary" id="btn-sat-verify" onclick="verificarSAT()">
-             <span class="spinner" id="spin-sat"></span> Verificar en SAT
+             <span class="spin" id="spin-sat" style="display:none"></span> Verificar en SAT
            </button>
            <button class="btn btn-success" id="btn-print-sat" style="display:none" onclick="imprimirSAT()"><span class="spin" id="spin-print-sat" style="display:none"></span>🖨️ Imprimir desde SAT</button>
         </div>
@@ -211,6 +211,8 @@
           <label>Nombre del Proveedor (para la carpeta en Drive)</label>
           <input type="text" id="inp-proveedor" placeholder="Ej: Proveedor SA de CV"/>
         </div>
+
+        <div class="alert err" id="err-step2"><span>⚠️</span><span id="err-step2-msg"></span></div>
 
         <div id="drive-result" style="display:none; margin-top:20px;">
           <div class="badge vigente">
