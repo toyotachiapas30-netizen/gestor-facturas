@@ -115,10 +115,14 @@ router.get('/', async (req, res) => {
     if (db.type === 'supabase') {
       let query = db.client.from('gastos').select('*');
       if (mes) query = query.eq('mes', mes);
-      if (categoria) query = query.eq('categoria', categoria);
       if (estatus) query = query.eq('estatus', estatus);
       if (desde) query = query.gte('fecha_factura', desde);
       if (hasta) query = query.lte('fecha_factura', hasta);
+      
+      if (categoria) {
+        const catArray = categoria.split(',').filter(Boolean);
+        if (catArray.length > 0) query = query.in('categoria', catArray);
+      }
       
       const { data: rows, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
@@ -131,10 +135,17 @@ router.get('/', async (req, res) => {
       let sql = 'SELECT * FROM gastos WHERE 1=1';
       const params = [];
       if (mes) { sql += ' AND mes = ?'; params.push(mes); }
-      if (categoria) { sql += ' AND categoria = ?'; params.push(categoria); }
       if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
       if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
       if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
+      
+      if (categoria) {
+        const catArray = categoria.split(',').filter(Boolean);
+        if (catArray.length > 0) {
+          sql += ` AND categoria IN (${catArray.map(() => '?').join(',')})`;
+          params.push(...catArray);
+        }
+      }
       
       sql += ' ORDER BY created_at DESC';
 
@@ -283,6 +294,7 @@ router.get('/stats', async (req, res) => {
     const mesFiltro = req.query.mes || '';
     const desde = req.query.desde || '';
     const hasta = req.query.hasta || '';
+    const categoria = req.query.categoria || '';
     
     if (db.type === 'supabase') {
       const now = new Date();
@@ -290,6 +302,11 @@ router.get('/stats', async (req, res) => {
       
       if (desde) query = query.gte('fecha_factura', desde);
       if (hasta) query = query.lte('fecha_factura', hasta);
+
+      if (categoria) {
+        const catArray = categoria.split(',').filter(Boolean);
+        if (catArray.length > 0) query = query.in('categoria', catArray);
+      }
 
       if (mesFiltro) {
         query = query.eq('mes', mesFiltro);
@@ -330,6 +347,13 @@ router.get('/stats', async (req, res) => {
 
       if (desde) dateFilter += ` AND fecha_factura >= '${desde}'`;
       if (hasta) dateFilter += ` AND fecha_factura <= '${hasta}'`;
+
+      if (categoria) {
+        const catArray = categoria.split(',').filter(Boolean);
+        if (catArray.length > 0) {
+          dateFilter += ` AND categoria IN (${catArray.map(c => `'${c.replace(/'/g, "''")}'`).join(',')})`;
+        }
+      }
 
       if (mesFiltro) {
         dateFilter += ` AND mes = '${mesFiltro}'`;

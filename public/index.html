@@ -364,11 +364,18 @@
             <option value="">Todos los meses</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field" id="cat-multi-field" style="position:relative;">
           <label>Categoría</label>
-          <select id="filter-cat" onchange="loadGastos()">
-            <option value="">Todas</option>
-          </select>
+          <div class="multi-select-wrap" onclick="toggleCatDropdown(event)">
+            <div class="multi-select-trigger" id="cat-trigger">Todas</div>
+            <div class="multi-select-dropdown" id="cat-dropdown" onclick="event.stopPropagation()">
+              <div class="multi-option" onclick="selectOnlyAll()">
+                <input type="checkbox" id="cat-all" checked onchange="handleCatChange(this)">
+                <label for="cat-all">Todas</label>
+              </div>
+              <div id="cat-checklist"></div>
+            </div>
+          </div>
         </div>
         <div class="field">
           <label>Estatus</label>

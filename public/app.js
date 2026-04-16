@@ -695,10 +695,15 @@ function resetAll() {
 
 async function loadGastos() {
   const mes = document.getElementById('filter-mes').value;
-  const cat = document.getElementById('filter-cat').value;
   const est = document.getElementById('filter-estatus').value;
   const desde = document.getElementById('filter-desde').value;
   const hasta = document.getElementById('filter-hasta').value;
+
+  // Multi-select categories
+  const selectedCats = [];
+  const cbs = document.querySelectorAll('#cat-checklist input[type="checkbox"]:checked');
+  cbs.forEach(cb => selectedCats.push(cb.value));
+  const cat = selectedCats.join(',');
 
   let url = '/api/gastos?';
   if (mes) url += `mes=${encodeURIComponent(mes)}&`;
@@ -965,12 +970,66 @@ async function loadStats() {
   const desde = document.getElementById('filter-desde')?.value || '';
   const hasta = document.getElementById('filter-hasta')?.value || '';
   
+  // Multi-select categories
+  const selectedCats = [];
+  const cbs = document.querySelectorAll('#cat-checklist input[type="checkbox"]:checked');
+  cbs.forEach(cb => selectedCats.push(cb.value));
+  const cat = selectedCats.join(',');
+
   try {
-    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}`);
+    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}&categoria=${cat}`);
     const data = await r.json();
     if (data.ok) renderCharts(data.stats, rango);
   } catch(e) { 
     console.error('Stats error:', e); 
+  }
+}
+
+// ── Multi-select Helpers ──────────────────────────────────────────────────────
+function toggleCatDropdown(e) {
+  e.stopPropagation();
+  document.getElementById('cat-dropdown').classList.toggle('open');
+}
+
+window.addEventListener('click', () => {
+  document.getElementById('cat-dropdown').classList.remove('open');
+});
+
+function handleCatChange(cb) {
+  const allCb = document.getElementById('cat-all');
+  const checklist = document.querySelectorAll('#cat-checklist input[type="checkbox"]');
+  const trigger = document.getElementById('cat-trigger');
+
+  if (cb.id === 'cat-all') {
+    if (cb.checked) {
+      checklist.forEach(c => c.checked = false);
+    }
+  } else {
+    if (cb.checked) {
+      allCb.checked = false;
+    }
+  }
+
+  // Update Trigger Text
+  const checked = document.querySelectorAll('#cat-checklist input[type="checkbox"]:checked');
+  if (allCb.checked || checked.length === 0) {
+    if (checked.length === 0) allCb.checked = true;
+    trigger.textContent = 'Todas';
+  } else if (checked.length === 1) {
+    trigger.textContent = checked[0].value;
+  } else {
+    trigger.textContent = `Varios (${checked.length})`;
+  }
+
+  loadGastos();
+  loadStats();
+}
+
+function selectOnlyAll() {
+  const allCb = document.getElementById('cat-all');
+  if (!allCb.checked) {
+    allCb.checked = true;
+    handleCatChange(allCb);
   }
 }
 
@@ -994,21 +1053,32 @@ async function loadMeses() {
 }
 
 function populateCategorias() {
-  // Filter dropdown
-  const filterCat = document.getElementById('filter-cat');
-  CATEGORIAS.forEach(c => {
-    const o = document.createElement('option');
-    o.value = c; o.textContent = c;
-    filterCat.appendChild(o);
-  });
+  // Filter Checklist
+  const checklist = document.getElementById('cat-checklist');
+  if (checklist) {
+    checklist.innerHTML = '';
+    CATEGORIAS.forEach((c, idx) => {
+      const id = `cat-item-${idx}`;
+      const div = document.createElement('div');
+      div.className = 'multi-option';
+      div.innerHTML = `
+        <input type="checkbox" id="${id}" value="${c}" onchange="handleCatChange(this)">
+        <label for="${id}">${c}</label>
+      `;
+      checklist.appendChild(div);
+    });
+  }
 
-  // Form dropdown
+  // Form dropdown (keep as single select)
   const formCat = document.getElementById('gf-categoria');
-  CATEGORIAS.forEach(c => {
-    const o = document.createElement('option');
-    o.value = c; o.textContent = c;
-    formCat.appendChild(o);
-  });
+  if (formCat) {
+    formCat.innerHTML = '<option value="">— Selecciona —</option>';
+    CATEGORIAS.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      formCat.appendChild(o);
+    });
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
