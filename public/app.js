@@ -811,8 +811,7 @@ function renderCharts(stats, rango) {
           grid: { display: false }, 
           ticks: { color: textColor, font: { size: 12, weight: '600' } } 
         }
-      },
-      layout: { padding: { right: 50 } }
+      }
     }
   });
 

@@ -147,20 +147,27 @@ header p { color:var(--text-sub); font-size:15px; }
 .step-panel.active { display:block; animation:fadeIn .3s ease; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 /* ── Charts ───────────────────────── */
-.chart-grid { display:grid; grid-template-columns:1.5fr 1fr; gap:20px; margin-top:20px; }
-@media (max-width: 900px) {
-  .chart-grid { grid-template-columns:1fr; }
+.gastos-charts { 
+  display:grid; 
+  grid-template-columns: 1fr 1fr; 
+  gap:20px; 
+  margin-top:20px; 
 }
-.chart-container { 
+@media (max-width: 900px) {
+  .gastos-charts { grid-template-columns:1fr; }
+}
+.chart-card { 
   background:#fff; 
   border:1px solid var(--border); 
   border-radius:16px; 
   padding:24px; 
   min-height:350px; 
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 4px 20px rgba(0,0,0,0.04);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.chart-container:hover {
+.chart-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(0,0,0,0.08);
 }
