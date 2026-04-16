@@ -764,31 +764,28 @@ function renderCharts(stats, rango) {
 
   const textColor = '#1e293b';
   const gridColor = 'rgba(226, 232, 240, 0.8)';
-  // Toyota Premium Palette: Deep Red, Slate, Muted Blue-Grey
-  const colors = ['#eb0a1e', '#1e293b', '#64748b', '#94a3b8', '#cbd5e1', '#f1f5f9', '#fee2e2'];
+  
+  // Softer "Non-Alarming" Palette: Blues, Slate, Soft Grays (Toyota Corporate Feel)
+  const palette = ['#3b82f6', '#1e293b', '#64748b', '#94a3b8', '#cbd5e1', '#f1f5f9', '#93c5fd', '#d1d5db'];
 
-  // Slice to Top 7 for clarity
-  const barData = stats.byCategory.slice(0, 7);
-
-  // 1. Horizontal Bar Chart (More readable for long names)
+  // 1. Monthly Totals Bar Chart
+  const monthlyData = stats.monthly || [];
   chartBar = new Chart(ctxBar, {
     type: 'bar',
     data: {
-      labels: barData.map(c => c.categoria),
+      labels: monthlyData.map(m => m.label),
       datasets: [{
-        label: 'Monto Total',
-        data: barData.map(c => c.total),
-        backgroundColor: colors,
-        borderColor: colors.map(c => c),
-        borderWidth: 0,
+        label: 'Gasto Total',
+        data: monthlyData.map(m => m.total),
+        backgroundColor: '#3b82f6', 
         borderRadius: 6,
-        barThickness: 24,
+        barThickness: 'flex',
+        maxBarWidth: 40
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      indexAxis: 'y',
       plugins: {
         legend: { display: false },
         tooltip: {
