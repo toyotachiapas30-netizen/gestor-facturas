@@ -2,7 +2,10 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const multer = require('multer');
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
+const { getAuthorizedClient, getGoogle } = require('./drive');
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -44,17 +47,17 @@ function getDB() {
       categoria TEXT,
       mes TEXT,
       sheet_url TEXT,
+      comprobante_pago_url TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )
   `);
 
   // Migration for existing databases
+  try { _db.exec(`ALTER TABLE gastos ADD COLUMN sheet_url TEXT`); } catch (err) {}
   try {
-    _db.exec(`ALTER TABLE gastos ADD COLUMN sheet_url TEXT`);
-    console.log('✅ [DB] Migración: Columna sheet_url añadida.');
-  } catch (err) {
-    // Column already exists or other error
-  }
+    _db.exec(`ALTER TABLE gastos ADD COLUMN comprobante_pago_url TEXT`);
+    console.log('✅ [DB] Migración: Columna comprobante_pago_url añadida.');
+  } catch (err) {}
   
   return { type: 'sqlite', client: _db };
 }
@@ -383,6 +386,89 @@ router.get('/stats', async (req, res) => {
     }
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── POST /api/gastos/:id/upload-pago ────────────────
+router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
+  const { id } = req.params;
+  const file = req.file;
+  if (!file) return res.status(400).json({ ok: false, error: 'No se recibió archivo.' });
+
+  try {
+    const db = getDB();
+    let gasto;
+    if (db.type === 'supabase') {
+      const { data, error } = await db.client.from('gastos').select('*').eq('id', id).single();
+      if (error) throw error;
+      gasto = data;
+    } else {
+      gasto = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    }
+    if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    const client = getAuthorizedClient();
+    if (!client) return res.status(401).json({ ok: false, error: 'Google no autorizado.' });
+    const drive = getGoogle().drive({ version: 'v3', auth: client });
+
+    // Step 1: Find or create the provider subfolder
+    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    const searchRes = await drive.files.list({
+      q: `'${rootFolderId}' in parents and name='${gasto.proveedor}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id)'
+    });
+    
+    let folderId;
+    if (searchRes.data.files.length > 0) {
+      folderId = searchRes.data.files[0].id;
+    } else {
+      const newFolder = await drive.files.create({
+        requestBody: { name: gasto.proveedor, mimeType: 'application/vnd.google-apps.folder', parents: [rootFolderId] },
+        fields: 'id'
+      });
+      folderId = newFolder.data.id;
+    }
+
+    // Step 2: Upload the PDF
+    const driveRes = await drive.files.create({
+      requestBody: { name: `PAGO_${gasto.folio}_${file.originalname}`, parents: [folderId] },
+      media: { mimeType: 'application/pdf', body: require('stream').Readable.from(file.buffer) },
+      fields: 'id, webViewLink'
+    });
+
+    const url = driveRes.data.webViewLink;
+
+    // Step 3: Update DB
+    if (db.type === 'supabase') {
+      await db.client.from('gastos').update({ comprobante_pago_url: url, estatus: 'pagado' }).eq('id', id);
+    } else {
+      db.client.prepare('UPDATE gastos SET comprobante_pago_url = ?, estatus = ? WHERE id = ?').run(url, 'pagado', id);
+    }
+
+    return res.json({ ok: true, url });
+  } catch (err) {
+    console.error('Upload pago error:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── GET /api/gastos/:id/download-comprobante ────────
+router.get('/:id/download-comprobante', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = getDB();
+    let row;
+    if (db.type === 'supabase') {
+      const { data, error } = await db.client.from('gastos').select('comprobante_pago_url').eq('id', id).single();
+      if (error) throw error;
+      row = data;
+    } else {
+      row = db.client.prepare('SELECT comprobante_pago_url FROM gastos WHERE id = ?').get(id);
+    }
+    if (!row || !row.comprobante_pago_url) return res.status(404).send('No hay comprobante.');
+    res.redirect(row.comprobante_pago_url);
+  } catch (err) {
+    res.status(500).send(err.message);
   }
 });
 

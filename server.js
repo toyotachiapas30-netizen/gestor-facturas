@@ -15,7 +15,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Rutas ─────────────────────────────────────────────────
 app.use('/api/sat',     require('./routes/sat'));
-app.use('/api/drive',   require('./routes/drive'));
+app.use('/api/drive',   require('./routes/drive').router);
 app.use('/api/sheets',  require('./routes/sheets'));
 app.use('/api/autotec', require('./routes/autotec-buzon'));
 app.use('/api/portal',  require('./routes/autotec-portal'));

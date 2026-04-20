@@ -733,6 +733,14 @@ async function loadGastos() {
         <td>${escHtml(g.folio)}</td>
         <td style="white-space:nowrap;">${fmtShortDate(g.fecha_factura)}</td>
         <td class="monto-cell" style="font-weight:600;color:var(--primary);">${fmtMonto(String(g.monto), 'MXN')}</td>
+        <td class="pago-cell" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handlePagoDrop(event, '${g.id}')">
+          <div class="pago-cell-content">
+            ${g.comprobante_pago_url ? 
+              `<a href="/api/gastos/${g.id}/download-comprobante" target="_blank" title="Descargar Comprobante" style="font-size:18px;text-decoration:none;">📄</a>` : 
+              `<span class="pago-placeholder" style="opacity:0.3;cursor:default;" title="Arrastra el PDF aquí">＋</span>`
+            }
+          </div>
+        </td>
         <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(g.concepto)}">${escHtml(g.concepto)}</td>
         <td style="white-space:nowrap;">${fmtShortDate(g.fecha_solicitud)}</td>
         <td style="text-align:center;">
@@ -759,6 +767,48 @@ async function loadGastos() {
   } catch (err) {
     console.error('Error loading gastos:', err);
   }
+}
+
+// ── Manejo de Comprobante de Pago (Drag & Drop) ──
+async function handlePagoDrop(e, id) {
+  e.preventDefault();
+  const cell = e.currentTarget;
+  cell.classList.remove('drag-over');
+
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+
+  if (file.type !== 'application/pdf') {
+    alert('Por favor, sube solo archivos PDF.');
+    return;
+  }
+
+  // Visual feedback
+  const content = cell.querySelector('.pago-cell-content');
+  const oldHtml = content.innerHTML;
+  content.innerHTML = '<span class="spin-small"></span>';
+
+  try {
+    await uploadComprobante(id, file);
+  } catch (err) {
+    alert('Error al subir: ' + err.message);
+    content.innerHTML = oldHtml;
+  }
+}
+
+async function uploadComprobante(id, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+
+  const r = await fetch(`/api/gastos/${id}/upload-pago`, {
+    method: 'POST',
+    body: fd
+  });
+  const data = await r.json();
+  if (!data.ok) throw new Error(data.error);
+
+  // Success: reload table to show the icon and update status to 'pagado'
+  loadGastos();
 }
 
 let chartDist = null;

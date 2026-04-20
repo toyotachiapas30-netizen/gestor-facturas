@@ -147,4 +147,8 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async 
   }
 });
 
-module.exports = router;
+module.exports = {
+  router,
+  getAuthorizedClient,
+  getGoogle
+};

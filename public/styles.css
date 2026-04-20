@@ -338,6 +338,15 @@ header p { color:var(--text-sub); font-size:15px; }
 /* ── Monto in table ───────────────── */
 .monto-cell { font-weight:700; font-size:14px; color:#60a5fa; white-space:nowrap; }
 
+/* ── Comprobante de Pago cell ─────── */
+.pago-cell { text-align: center; min-width: 140px; transition: background 0.2s; position: relative; }
+.pago-cell.drag-over { background: rgba(59, 130, 246, 0.15) !important; outline: 2px dashed var(--accent); }
+.pago-cell-content { display: flex; align-items: center; justify-content: center; min-height: 32px; }
+.spin-small {
+  width: 16px; height: 16px; border: 2px solid rgba(0,0,0,0.1); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+
 /* ── Empty state ──────────────────── */
 .empty-state { text-align:center; padding:60px 24px; }
 .empty-state .empty-icon { font-size:56px; margin-bottom:16px; opacity:.6; }
