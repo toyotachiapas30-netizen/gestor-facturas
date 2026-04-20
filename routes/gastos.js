@@ -440,7 +440,8 @@ router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
 
     // Step 3: Update DB
     if (db.type === 'supabase') {
-      await db.client.from('gastos').update({ comprobante_pago_url: url, estatus: 'pagado' }).eq('id', id);
+      const { error } = await db.client.from('gastos').update({ comprobante_pago_url: url, estatus: 'pagado' }).eq('id', id);
+      if (error) throw error;
     } else {
       db.client.prepare('UPDATE gastos SET comprobante_pago_url = ?, estatus = ? WHERE id = ?').run(url, 'pagado', id);
     }
