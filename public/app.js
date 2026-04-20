@@ -736,7 +736,10 @@ async function loadGastos() {
         <td class="pago-cell" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handlePagoDrop(event, '${g.id}')">
           <div class="pago-cell-content">
             ${g.comprobante_pago_url ? 
-              `<a href="/api/gastos/${g.id}/download-comprobante" target="_blank" title="Descargar Comprobante" style="font-size:18px;text-decoration:none;">📄</a>` : 
+              `<div class="pago-link-wrap">
+                <a href="/api/gastos/${g.id}/download-comprobante" target="_blank" title="Descargar Comprobante" style="font-size:18px;text-decoration:none;">📄</a>
+                <button class="pago-delete-btn" onclick="borrarComprobante('${g.id}')" title="Eliminar Comprobante">×</button>
+              </div>` : 
               `<span class="pago-placeholder" style="opacity:0.3;cursor:default;" title="Arrastra el PDF aquí">＋</span>`
             }
           </div>
@@ -809,6 +812,18 @@ async function uploadComprobante(id, file) {
 
   // Success: reload table to show the icon and update status to 'pagado'
   loadGastos();
+}
+
+async function borrarComprobante(id) {
+  if (!confirm('¿Estás seguro de que deseas eliminar este comprobante?')) return;
+  try {
+    const r = await fetch(`/api/gastos/${id}/pago`, { method: 'DELETE' });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error);
+    loadGastos();
+  } catch (err) {
+    alert('Error al eliminar: ' + err.message);
+  }
 }
 
 let chartDist = null;

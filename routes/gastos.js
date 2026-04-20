@@ -473,4 +473,21 @@ router.get('/:id/download-comprobante', async (req, res) => {
   }
 });
 
+// ── DELETE /api/gastos/:id/pago ─────────────────────
+router.delete('/:id/pago', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = getDB();
+    if (db.type === 'supabase') {
+      const { error } = await db.client.from('gastos').update({ comprobante_pago_url: null, estatus: 'en_proceso' }).eq('id', id);
+      if (error) throw error;
+    } else {
+      db.client.prepare('UPDATE gastos SET comprobante_pago_url = NULL, estatus = ? WHERE id = ?').run('en_proceso', id);
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
