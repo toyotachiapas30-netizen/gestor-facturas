@@ -729,7 +729,7 @@ async function loadGastos() {
   const selectedCats = [];
   const cbs = document.querySelectorAll('#cat-checklist input[type="checkbox"]:checked');
   cbs.forEach(cb => selectedCats.push(cb.value));
-  const cat = selectedCats.join(',');
+  const cat = selectedCats.join('|');
 
   let url = '/api/gastos?';
   if (mes) url += `mes=${encodeURIComponent(mes)}&`;
@@ -1065,7 +1065,7 @@ async function loadStats() {
   const selectedCats = [];
   const cbs = document.querySelectorAll('#cat-checklist input[type="checkbox"]:checked');
   cbs.forEach(cb => selectedCats.push(cb.value));
-  const cat = selectedCats.join(',');
+  const cat = selectedCats.join('|');
 
   try {
     const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}&categoria=${cat}`);

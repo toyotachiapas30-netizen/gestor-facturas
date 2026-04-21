@@ -123,7 +123,7 @@ router.get('/', async (req, res) => {
       if (hasta) query = query.lte('fecha_factura', hasta);
       
       if (categoria) {
-        const catArray = categoria.split(',').filter(Boolean);
+        const catArray = categoria.split('|').filter(Boolean);
         if (catArray.length > 0) query = query.in('categoria', catArray);
       }
       
@@ -143,7 +143,7 @@ router.get('/', async (req, res) => {
       if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
       
       if (categoria) {
-        const catArray = categoria.split(',').filter(Boolean);
+        const catArray = categoria.split('|').filter(Boolean);
         if (catArray.length > 0) {
           sql += ` AND categoria IN (${catArray.map(() => '?').join(',')})`;
           params.push(...catArray);
@@ -307,7 +307,7 @@ router.get('/stats', async (req, res) => {
       if (hasta) query = query.lte('fecha_factura', hasta);
 
       if (categoria) {
-        const catArray = categoria.split(',').filter(Boolean);
+        const catArray = categoria.split('|').filter(Boolean);
         if (catArray.length > 0) query = query.in('categoria', catArray);
       }
 
@@ -352,7 +352,7 @@ router.get('/stats', async (req, res) => {
       if (hasta) dateFilter += ` AND fecha_factura <= '${hasta}'`;
 
       if (categoria) {
-        const catArray = categoria.split(',').filter(Boolean);
+        const catArray = categoria.split('|').filter(Boolean);
         if (catArray.length > 0) {
           dateFilter += ` AND categoria IN (${catArray.map(c => `'${c.replace(/'/g, "''")}'`).join(',')})`;
         }
