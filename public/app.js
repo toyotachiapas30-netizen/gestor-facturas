@@ -597,6 +597,11 @@ async function autoRegistrarGasto(concepto, categoria, sheetUrl) {
 function openSettings() {
   document.getElementById('settings-overlay').classList.add('open');
   checkGoogleAuth();
+
+  // Show tips for Render/Cloud environments
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const renderNote = document.getElementById('render-note');
+  if (renderNote) renderNote.style.display = isLocal ? 'none' : 'block';
 }
 function closeSettings() { document.getElementById('settings-overlay').classList.remove('open'); }
 
@@ -609,7 +614,10 @@ async function checkGoogleAuth() {
     el.style.color = d.authorized ? '#6ee7b7' : '#fca5a5';
     document.getElementById('config-banner').classList.toggle('hidden', d.authorized);
     if (d.authorized) loadSheets();
-  } catch {}
+    return d.authorized;
+  } catch {
+    return false;
+  }
 }
 
 async function authGoogle() {
@@ -617,9 +625,27 @@ async function authGoogle() {
     const r = await fetch('/api/drive/auth-url');
     const d = await r.json();
     if (d.url) window.open(d.url,'_blank');
-    // Poll for auth completion
-    setTimeout(async () => { await checkGoogleAuth(); if(document.getElementById('sel-sheet').options.length<=1) loadSheets(); }, 5000);
+    // Poll for auth completion (more aggressive for better UX)
+    let checks = 0;
+    const interval = setInterval(async () => {
+        const authorized = await checkGoogleAuth();
+        checks++;
+        if (authorized || checks > 10) {
+            clearInterval(interval);
+            if (authorized) loadSheets();
+        }
+    }, 5000);
   } catch(err) { alert('Error: '+err.message); }
+}
+
+async function logoutGoogle() {
+  if (!confirm('¿Seguro que quieres cerrar la sesión de Google?')) return;
+  try {
+    const r = await fetch('/api/drive/logout', { method: 'POST' });
+    const d = await r.json();
+    alert(d.message);
+    await checkGoogleAuth();
+  } catch(err) { alert('Error: ' + err.message); }
 }
 
 function resetFlow() {

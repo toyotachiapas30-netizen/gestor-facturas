@@ -36,6 +36,7 @@ function getAuthorizedClient() {
   
   // 1. Try Refresh Token from Env (Cloud Mode)
   if (process.env.GOOGLE_REFRESH_TOKEN) {
+    console.log('Using GOOGLE_REFRESH_TOKEN from environment');
     client.setCredentials({
       refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
       client_id: process.env.GOOGLE_CLIENT_ID,
@@ -46,6 +47,7 @@ function getAuthorizedClient() {
 
   // 2. Try Local File (Local Mode)
   if (fs.existsSync(TOKENS_FILE)) {
+    console.log('Using tokens from local file:', TOKENS_FILE);
     const tokens = JSON.parse(fs.readFileSync(TOKENS_FILE));
     client.setCredentials(tokens);
     return client;
@@ -71,9 +73,44 @@ router.get('/callback', async (req, res) => {
     const client = getOAuthClient(req);
     const { tokens } = await client.getToken(code);
     fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens));
-    res.send('<html><body style="font-family:sans-serif;text-align:center;padding:80px;background:#0a0f1e;color:#f0f4ff"><h2>✅ Google autorizado correctamente</h2><p>Puedes cerrar esta ventana y regresar a la app.</p></body></html>');
+
+    const refreshToken = tokens.refresh_token;
+    
+    let extraMsg = '';
+    if (refreshToken) {
+        extraMsg = `
+            <div style="margin-top:20px;padding:15px;background:#1a2234;border-radius:8px;border:1px solid #303f5f;text-align:left;">
+                <p style="color:#a0aec0;font-size:14px;margin-top:0;"><b>Atención (Usuarios de Render/Cloud):</b></p>
+                <p style="font-size:13px;margin-bottom:10px;">Si estás usando la app en la nube, debes actualizar tu variable de entorno <b>GOOGLE_REFRESH_TOKEN</b> con este valor:</p>
+                <code style="display:block;background:#000;padding:10px;border-radius:4px;word-break:break-all;color:#00ff00;font-family:monospace;">${refreshToken}</code>
+            </div>
+        `;
+    }
+
+    res.send(`
+        <html>
+        <body style="font-family:sans-serif;text-align:center;padding:40px;background:#0a0f1e;color:#f0f4ff;max-width:600px;margin:auto;">
+            <h2 style="color:#48bb78">✅ Google autorizado correctamente</h2>
+            <p>Se han guardado los tokens localmente.</p>
+            ${extraMsg}
+            <p style="margin-top:30px;"><a href="/" style="color:#63b3ed;text-decoration:none;">← Regresar a la app</a></p>
+        </body>
+        </html>
+    `);
   } catch (err) {
     res.status(500).send('Error al obtener tokens: ' + err.message);
+  }
+});
+
+// ── POST /api/drive/logout  →  Clear tokens ───
+router.post('/logout', (req, res) => {
+  try {
+    if (fs.existsSync(TOKENS_FILE)) {
+      fs.unlinkSync(TOKENS_FILE);
+    }
+    res.json({ ok: true, message: 'Tokens eliminados. Por favor actualiza la página.' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
