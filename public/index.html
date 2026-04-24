@@ -359,6 +359,11 @@
       <!-- Filters -->
       <div class="gastos-filters">
         <div class="field">
+          <label>Proveedor</label>
+          <input type="text" id="filter-proveedor" list="list-proveedores" placeholder="Buscar proveedor..." oninput="debounceLoad()" style="padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-main); font-family: inherit;">
+          <datalist id="list-proveedores"></datalist>
+        </div>
+        <div class="field">
           <label>Mes</label>
           <select id="filter-mes" onchange="loadGastos(); loadStats()">
             <option value="">Todos los meses</option>

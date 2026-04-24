@@ -721,6 +721,7 @@ function resetAll() {
 
 async function loadGastos() {
   const mes = document.getElementById('filter-mes').value;
+  const prov = document.getElementById('filter-proveedor')?.value || '';
   const est = document.getElementById('filter-estatus').value;
   const desde = document.getElementById('filter-desde').value;
   const hasta = document.getElementById('filter-hasta').value;
@@ -734,6 +735,7 @@ async function loadGastos() {
   let url = '/api/gastos?';
   if (mes) url += `mes=${encodeURIComponent(mes)}&`;
   if (cat) url += `categoria=${encodeURIComponent(cat)}&`;
+  if (prov) url += `proveedor=${encodeURIComponent(prov.trim())}&`;
   if (est) url += `estatus=${encodeURIComponent(est)}&`;
   if (desde) url += `desde=${encodeURIComponent(desde)}&`;
   if (hasta) url += `hasta=${encodeURIComponent(hasta)}&`;
@@ -741,7 +743,29 @@ async function loadGastos() {
   try {
     const r = await fetch(url);
     const data = await r.json();
-    if (!data.ok) return;
+    
+    const tbody = document.getElementById('gastos-tbody');
+    const empty = document.getElementById('gastos-empty');
+    const tableContainer = document.getElementById('gastos-table-container');
+
+    if (!data.ok || !data.gastos || data.gastos.length === 0) {
+      tbody.innerHTML = '';
+      if (empty) empty.style.display = 'block';
+      if (tableContainer) tableContainer.style.display = 'none';
+      
+      // Still update summary if data exists but list is empty
+      if (data.resumen) {
+        document.getElementById('gs-count').textContent = data.resumen.count;
+        document.getElementById('gs-total').textContent = fmtMonto(String(data.resumen.total), 'MXN');
+        document.getElementById('gs-proceso').textContent = data.resumen.enProceso;
+        document.getElementById('gs-pagados').textContent = data.resumen.pagados;
+      }
+      loadStats();
+      return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    if (tableContainer) tableContainer.style.display = 'block';
 
     // Update summary
     document.getElementById('gs-count').textContent = data.resumen.count;
@@ -1058,6 +1082,7 @@ async function saveGasto() {
 async function loadStats() {
   const rango = document.getElementById('filter-rango')?.value || '30';
   const mes = document.getElementById('filter-mes')?.value || '';
+  const prov = document.getElementById('filter-proveedor')?.value || '';
   const desde = document.getElementById('filter-desde')?.value || '';
   const hasta = document.getElementById('filter-hasta')?.value || '';
   
@@ -1068,11 +1093,39 @@ async function loadStats() {
   const cat = selectedCats.join('|');
 
   try {
-    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}&categoria=${cat}`);
+    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}&categoria=${cat}&proveedor=${encodeURIComponent(prov.trim())}`);
     const data = await r.json();
     if (data.ok) renderCharts(data.stats, rango);
   } catch(e) { 
     console.error('Stats error:', e); 
+  }
+}
+
+let debounceTimer = null;
+function debounceLoad() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    loadGastos();
+    loadStats();
+  }, 400);
+}
+
+async function loadProveedores() {
+  try {
+    const r = await fetch('/api/gastos/proveedores');
+    const data = await r.json();
+    if (!data.ok) return;
+    
+    const dl = document.getElementById('list-proveedores');
+    if (!dl) return;
+    dl.innerHTML = '';
+    data.proveedores.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p;
+      dl.appendChild(o);
+    });
+  } catch (err) {
+    console.error('Error cargando proveedores:', err);
   }
 }
 
@@ -1178,6 +1231,7 @@ window.addEventListener('DOMContentLoaded', () => {
   populateCategorias();
   loadMeses();
   loadGastos();
+  loadProveedores();
 });
 
 /** Helper to convert base64 to Blob for PDF display */

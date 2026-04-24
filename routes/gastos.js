@@ -90,6 +90,24 @@ router.get('/categorias', (req, res) => {
   res.json({ ok: true, categorias: CATEGORIAS });
 });
 
+// ── GET /api/gastos/proveedores ───────────────────────────
+router.get('/proveedores', async (req, res) => {
+  try {
+    const db = getDB();
+    if (db.type === 'supabase') {
+      const { data, error } = await db.client.from('gastos').select('proveedor').order('proveedor', { ascending: true });
+      if (error) throw error;
+      const providers = Array.from(new Set(data.map(r => r.proveedor).filter(Boolean)));
+      return res.json({ ok: true, proveedores: providers });
+    } else {
+      const rows = db.client.prepare('SELECT DISTINCT proveedor FROM gastos ORDER BY proveedor ASC').all();
+      return res.json({ ok: true, proveedores: rows.map(r => r.proveedor) });
+    }
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── GET /api/gastos/check/:uuid ───────────────────────────
 router.get('/check/:uuid', async (req, res) => {
   try {
@@ -111,7 +129,7 @@ router.get('/check/:uuid', async (req, res) => {
 
 // ── GET /api/gastos  →  List expenses ──
 router.get('/', async (req, res) => {
-  const { mes, categoria, estatus, desde, hasta } = req.query;
+  const { mes, categoria, estatus, desde, hasta, proveedor } = req.query;
   const db = getDB();
 
   try {
@@ -121,6 +139,7 @@ router.get('/', async (req, res) => {
       if (estatus) query = query.eq('estatus', estatus);
       if (desde) query = query.gte('fecha_factura', desde);
       if (hasta) query = query.lte('fecha_factura', hasta);
+      if (proveedor) query = query.ilike('proveedor', `%${proveedor}%`);
       
       if (categoria) {
         const catArray = categoria.split('|').filter(Boolean);
@@ -141,6 +160,7 @@ router.get('/', async (req, res) => {
       if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
       if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
       if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
+      if (proveedor) { sql += ' AND proveedor LIKE ?'; params.push(`%${proveedor}%`); }
       
       if (categoria) {
         const catArray = categoria.split('|').filter(Boolean);
@@ -298,6 +318,7 @@ router.get('/stats', async (req, res) => {
     const desde = req.query.desde || '';
     const hasta = req.query.hasta || '';
     const categoria = req.query.categoria || '';
+    const proveedor = req.query.proveedor || '';
     
     if (db.type === 'supabase') {
       const now = new Date();
@@ -305,6 +326,7 @@ router.get('/stats', async (req, res) => {
       
       if (desde) query = query.gte('fecha_factura', desde);
       if (hasta) query = query.lte('fecha_factura', hasta);
+      if (proveedor) query = query.ilike('proveedor', `%${proveedor}%`);
 
       if (categoria) {
         const catArray = categoria.split('|').filter(Boolean);
@@ -350,6 +372,7 @@ router.get('/stats', async (req, res) => {
 
       if (desde) dateFilter += ` AND fecha_factura >= '${desde}'`;
       if (hasta) dateFilter += ` AND fecha_factura <= '${hasta}'`;
+      if (proveedor) dateFilter += ` AND proveedor LIKE '%${proveedor.replace(/'/g, "''")}%'`;
 
       if (categoria) {
         const catArray = categoria.split('|').filter(Boolean);
