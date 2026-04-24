@@ -773,10 +773,6 @@ async function loadGastos() {
     document.getElementById('gs-proceso').textContent = data.resumen.enProceso;
     document.getElementById('gs-pagados').textContent = data.resumen.pagados;
 
-    const tbody = document.getElementById('gastos-tbody');
-    const empty = document.getElementById('gastos-empty');
-    const tableContainer = document.getElementById('gastos-table-container');
-
     tbody.innerHTML = data.gastos.map(g => `
       <tr>
         <td style="font-weight:600;white-space:nowrap;">${escHtml(g.proveedor)}</td>
