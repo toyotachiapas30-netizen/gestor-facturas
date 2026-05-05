@@ -41,6 +41,7 @@ async function cloudPost(endpoint, body) {
     const r = await fetch(`${API}/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error(await r.text());
@@ -106,7 +107,7 @@ async function loadAll() {
     fetch('takata_vins.json').then(r=>r.json()),
     fetch('kpis_data.json').then(r=>r.json()),
     fetch('vins_proceso.json').then(r=>r.json()),
-    fetch(`${API}/state`).then(r=>r.json()).catch(() => null),
+    fetch(`${API}/state`, { credentials: 'include' }).then(r=>r.json()).catch(() => null),
   ]);
 
   vinData = v; kpisData = k; procesoData = p;
