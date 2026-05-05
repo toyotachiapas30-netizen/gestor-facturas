@@ -102,54 +102,71 @@ async function saveCampEntry(mes, dealer, camp, valor) {
    LOAD DATA
 ══════════════════════════════════════════ */
 async function loadAll() {
-  // Cargar archivos estaticos base + estado en nube en paralelo
-  const [v, k, p, cloudState] = await Promise.all([
-    fetch('takata_vins.json').then(r=>r.json()),
-    fetch('kpis_data.json').then(r=>r.json()),
-    fetch('vins_proceso.json').then(r=>r.json()),
-    fetch(`${API}/state`, { credentials: 'include' }).then(r=>r.json()).catch(() => null),
-  ]);
+  try {
+    // Cargar archivos estaticos base + estado en nube en paralelo
+    const safeJson = (url) => fetch(url, { credentials: 'same-origin' })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} al cargar ${url}`);
+        return r.json();
+      })
+      .catch(err => { console.error(`[Takata] Error cargando ${url}:`, err); throw err; });
 
-  vinData = v; kpisData = k; procesoData = p;
+    const [v, k, p, cloudState] = await Promise.all([
+      safeJson('takata_vins.json'),
+      safeJson('kpis_data.json'),
+      safeJson('vins_proceso.json'),
+      fetch(`${API}/state`, { credentials: 'same-origin' })
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null),
+    ]);
 
-  if (cloudState) {
-    // Modo nube: datos centralizados para todo el equipo
-    localEdits   = cloudState.edits    || {};
-    procesoEdits = cloudState.proceso  || {};
-    customVins   = cloudState.customVins || [];
-    campEdits    = cloudState.camp     || {};
-    console.log('☁️ [Takata] Estado cargado desde Supabase');
-  } else {
-    // Fallback offline: leer del localStorage
-    console.warn('💾 [Takata] Sin conexion a la nube, usando datos locales');
-    try { localEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')     || '{}'); } catch { localEdits = {}; }
-    try { procesoEdits = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { procesoEdits = {}; }
-    try { customVins   = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { customVins = []; }
-    try { campEdits    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { campEdits = {}; }
-  }
+    vinData = v; kpisData = k; procesoData = p;
 
-  // Merge custom records into main data
-  vinData = [...customVins, ...vinData];
-
-  // Auto-fill client names for process data from main vinData
-  procesoData.forEach(rp => {
-    if (!rp.cliente) {
-      const base = vinData.find(rv => rv.vin === rp.vin);
-      if (base) rp.cliente = base.cliente;
+    if (cloudState) {
+      // Modo nube: datos centralizados para todo el equipo
+      localEdits   = cloudState.edits    || {};
+      procesoEdits = cloudState.proceso  || {};
+      customVins   = cloudState.customVins || [];
+      campEdits    = cloudState.camp     || {};
+      console.log('☁️ [Takata] Estado cargado desde Supabase');
+    } else {
+      // Fallback offline: leer del localStorage
+      console.warn('💾 [Takata] Sin conexion a la nube, usando datos locales');
+      try { localEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')     || '{}'); } catch { localEdits = {}; }
+      try { procesoEdits = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { procesoEdits = {}; }
+      try { customVins   = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { customVins = []; }
+      try { campEdits    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { campEdits = {}; }
     }
-  });
 
-  // Merge persisted proceso edits into procesoData
-  Object.values(procesoEdits).forEach(pe => {
-    const idx = procesoData.findIndex(r => r.vin === pe.vin);
-    if (idx >= 0) Object.assign(procesoData[idx], pe);
-    else procesoData.unshift(pe);
-  });
+    // Merge custom records into main data
+    vinData = [...customVins, ...vinData];
 
-  qs('#last-updated-badge').textContent = 'Actualizado: '+new Date().toLocaleString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  initKpis();
-  initProceso();
-  initMatriz();
+    // Auto-fill client names for process data from main vinData
+    procesoData.forEach(rp => {
+      if (!rp.cliente) {
+        const base = vinData.find(rv => rv.vin === rp.vin);
+        if (base) rp.cliente = base.cliente;
+      }
+    });
+
+    // Merge persisted proceso edits into procesoData
+    Object.values(procesoEdits).forEach(pe => {
+      const idx = procesoData.findIndex(r => r.vin === pe.vin);
+      if (idx >= 0) Object.assign(procesoData[idx], pe);
+      else procesoData.unshift(pe);
+    });
+
+    qs('#last-updated-badge').textContent = 'Actualizado: '+new Date().toLocaleString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    initKpis();
+    initProceso();
+    initMatriz();
+
+  } catch (err) {
+    console.error('[Takata] Error crítico en loadAll:', err);
+    qs('#last-updated-badge').textContent = '⚠ Error al cargar datos';
+    qs('#last-updated-badge').style.background = '#c00';
+    qs('#campaigns-body').innerHTML = `<tr><td colspan="15" style="text-align:center;padding:20px;color:#f88">Error al cargar datos: ${err.message}. <a href="/takata/" style="color:#fff">Reintenta</a></td></tr>`;
+  }
 }
 
 /* ══════════════════════════════════════════
