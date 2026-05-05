@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acceso – Takata Toyota Chiapas</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, #0a0f1e 0%, #1a2340 50%, #0d1629 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Decoración de fondo */
+    body::before {
+      content: '';
+      position: absolute;
+      width: 600px; height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(235,0,27,0.08) 0%, transparent 70%);
+      top: -100px; left: -150px;
+      pointer-events: none;
+    }
+    body::after {
+      content: '';
+      position: absolute;
+      width: 500px; height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0,80,200,0.06) 0%, transparent 70%);
+      bottom: -100px; right: -100px;
+      pointer-events: none;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.04);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo-section {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    .logo-section img {
+      height: 44px;
+      filter: drop-shadow(0 2px 8px rgba(235,0,27,0.4));
+    }
+
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.05em;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      color: rgba(255,255,255,0.45);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      text-align: center;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      text-align: center;
+      font-size: 13px;
+      color: rgba(255,255,255,0.45);
+      margin-bottom: 32px;
+    }
+
+    .field {
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    input {
+      width: 100%;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 15px;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      transition: border-color 0.2s, background 0.2s;
+      outline: none;
+    }
+
+    input::placeholder { color: rgba(255,255,255,0.25); }
+
+    input:focus {
+      border-color: rgba(235,0,27,0.6);
+      background: rgba(255,255,255,0.10);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #eb001b, #c40017);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: opacity 0.2s, transform 0.1s;
+      letter-spacing: 0.03em;
+    }
+
+    .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    .error-msg {
+      background: rgba(235,0,27,0.15);
+      border: 1px solid rgba(235,0,27,0.3);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #ff6b7a;
+      font-size: 13px;
+      text-align: center;
+      margin-top: 14px;
+      display: none;
+    }
+
+    .error-msg.visible { display: block; }
+
+    .footer-note {
+      text-align: center;
+      font-size: 11px;
+      color: rgba(255,255,255,0.2);
+      margin-top: 28px;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo-section">
+      <img src="logo-principal.png" alt="Toyota" onerror="this.style.display='none'">
+      <div class="brand-text">
+        <span class="brand-name">Toyota Chiapas</span>
+        <span class="brand-sub">Portal Interno</span>
+      </div>
+    </div>
+
+    <h1>Acceso Restringido</h1>
+    <p class="subtitle">SEGUIMIENTO DE ACCIÓN DE SERVICIO TAKATA</p>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="usuario">Usuario</label>
+        <input type="text" id="usuario" name="usuario" placeholder="Ingresa tu usuario" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="clave">Contraseña</label>
+        <input type="password" id="clave" name="clave" placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn" id="loginBtn">Iniciar sesión</button>
+      <div class="error-msg" id="errorMsg">Usuario o contraseña incorrectos</div>
+    </form>
+
+    <p class="footer-note">Acceso exclusivo para personal autorizado</p>
+  </div>
+
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('loginBtn');
+      const errMsg = document.getElementById('errorMsg');
+      const usuario = document.getElementById('usuario').value.trim();
+      const clave   = document.getElementById('clave').value;
+
+      btn.disabled = true;
+      btn.textContent = 'Verificando...';
+      errMsg.classList.remove('visible');
+
+      try {
+        const res = await fetch('/takata/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usuario, clave }),
+          credentials: 'include'
+        });
+
+        if (res.ok) {
+          btn.textContent = '✓ Acceso concedido';
+          window.location.href = '/takata/';
+        } else {
+          errMsg.classList.add('visible');
+          btn.disabled = false;
+          btn.textContent = 'Iniciar sesión';
+        }
+      } catch (err) {
+        errMsg.textContent = 'Error de conexión. Intenta de nuevo.';
+        errMsg.classList.add('visible');
+        btn.disabled = false;
+        btn.textContent = 'Iniciar sesión';
+      }
+    });
+  </script>
+</body>
+</html>
