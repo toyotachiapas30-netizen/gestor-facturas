@@ -1,0 +1,189 @@
+[
+  {
+    "vin": "2T1KR32E85C479015",
+    "proceso": "NO SHOW",
+    "proc_color": "FFC00000",
+    "cita": "17/03/2026",
+    "actualizacion": "17/03/2026",
+    "unidad": "MATRIX 2005",
+    "acciones": "ACS DSF",
+    "agente": "MARIANA",
+    "comentario": ""
+  },
+  {
+    "vin": "JTDKT923X75058139",
+    "proceso": "EN PROCESO",
+    "proc_color": "FFFFFF00",
+    "cita": "",
+    "actualizacion": "06/03/2026",
+    "unidad": "YARIS 2007",
+    "acciones": "ACS G0P",
+    "agente": "KARLA",
+    "comentario": ""
+  },
+  {
+    "vin": "2T1BU4EE4AC271241",
+    "proceso": "EN ESPERA DE REFACCIONES",
+    "proc_color": "FF92D050",
+    "cita": "",
+    "actualizacion": "25/02/2026",
+    "unidad": "COROLLA 2010",
+    "acciones": "ACS C0M, E0M, G0P",
+    "agente": "KARLA",
+    "comentario": ""
+  },
+  {
+    "vin": "JTDKT9K31A5320198",
+    "proceso": "REALIZADO Y RECLAMADO",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "09/03/2026",
+    "unidad": "YARIS HB CORE AT 2010",
+    "acciones": "G0P + C0M",
+    "agente": "VALERIA",
+    "comentario": ""
+  },
+  {
+    "vin": "8AJEX32G074005505",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "24/03/2026",
+    "unidad": "HILUX 2007",
+    "acciones": "ACS F0L",
+    "agente": "KARLA",
+    "comentario": ""
+  },
+  {
+    "vin": "8AJEX32G474006270",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "11/03/2026",
+    "unidad": "HILUX 2007",
+    "acciones": "ACS F0L",
+    "agente": "KARLA",
+    "comentario": ""
+  },
+  {
+    "vin": "2T1BU4EE4DC096381",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "13/03/2026",
+    "unidad": "COROLLA 2013",
+    "acciones": "ACS G0P",
+    "agente": "CANDY",
+    "comentario": ""
+  },
+  {
+    "vin": "2T1BU4EE9AC357712",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "13/03/2026",
+    "unidad": "COROLLA 2010",
+    "acciones": "ACS G0P",
+    "agente": "CANDY",
+    "comentario": ""
+  },
+  {
+    "vin": "2T1BU4EE0BC610837",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "08/03/2026",
+    "unidad": "COROLLA 2011",
+    "acciones": "ACS G0P",
+    "agente": "REFACCIONES",
+    "comentario": ""
+  },
+  {
+    "vin": "2T1BU4EE9AC399622",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "10/03/2026",
+    "unidad": "COROLLA  2010",
+    "acciones": "ACS G0P",
+    "agente": "MAURICIO",
+    "comentario": ""
+  },
+  {
+    "vin": "8AJEX32G974009133",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "12/03/2026",
+    "unidad": "HILUX 2007",
+    "acciones": "ACS F0L",
+    "agente": "MAURICIO",
+    "comentario": ""
+  },
+  {
+    "vin": "2T1BU4EE7AC319234",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "13/03/2026",
+    "unidad": "COROLLA LE AT 2010",
+    "acciones": "ACS C0M, E0M Y G0P",
+    "agente": "DANIELA",
+    "comentario": ""
+  },
+  {
+    "vin": "8AJEX32G7B4030670",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "21/03/2026",
+    "unidad": "HILUX 2011",
+    "acciones": "ACS F0L",
+    "agente": "CANDY",
+    "comentario": ""
+  },
+  {
+    "vin": "2T1BU4EE6AC381854",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "03/03/2026",
+    "unidad": "COROLLA 2010",
+    "acciones": "ACS G0P",
+    "agente": "SANDY",
+    "comentario": ""
+  },
+  {
+    "vin": "9BRBA42E795001757",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "28/03/2026",
+    "unidad": "COROLLA CE MT",
+    "acciones": "HMA",
+    "agente": "MARIANA",
+    "comentario": ""
+  },
+  {
+    "vin": "JTEGD20V350086904",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "09/04/2026",
+    "unidad": "RAV4",
+    "acciones": "2005",
+    "agente": "OBETH",
+    "comentario": ""
+  },
+  {
+    "vin": "4T1F11AK9MU531947",
+    "proceso": "",
+    "proc_color": "00000000",
+    "cita": "",
+    "actualizacion": "17/04/2026",
+    "unidad": "CAMRY 2021",
+    "acciones": "23TA15",
+    "agente": "CANDY",
+    "comentario": ""
+  }
+]

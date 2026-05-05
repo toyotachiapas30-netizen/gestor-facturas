@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seguimiento Takata – Toyota Chiapas</title>
+  <meta name="description" content="Dashboard de seguimiento de VINs para acciones de servicio Takata. Control de contacto, citas y reclamos por dealer." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ========== HEADER ========== -->
+<header class="app-header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <div class="brand-logo" style="margin-right:16px;">
+        <img src="logo-principal.png" alt="Logo" style="height:45px; object-fit:contain; display:block;" onerror="this.style.display='none'">
+      </div>
+      <div class="brand-text">
+        <span class="brand-title">SEGUIMIENTO DE ACCIÓN DE SERVICIO TAKATA</span>
+      </div>
+    </div>
+    <div class="header-meta">
+      <div class="header-badge" id="last-updated-badge">Cargando…</div>
+    </div>
+  </div>
+</header>
+
+<!-- ========== NAVEGACIÓN DE TABS ========== -->
+<nav class="tabs-nav" aria-label="Secciones">
+  <div class="tabs-inner">
+    <button class="tab-btn active" data-tab="kpis" id="tab-kpis">📊 KPIs por Dealer</button>
+    <button class="tab-btn" data-tab="matriz" id="tab-matriz">📋 Base de datos</button>
+    <button class="tab-btn" data-tab="proceso" id="tab-proceso">🔄 VINs en Proceso</button>
+  </div>
+</nav>
+
+<!-- ================================================================
+     TAB 1 – KPIs POR DEALER
+================================================================ -->
+<section class="tab-content active" id="tab-content-kpis">
+  <div class="page-wrap">
+
+    <!-- Selector de mes -->
+    <div class="section-header">
+      <h2 class="section-title">Reclamos por Acción de Servicio</h2>
+      <div class="month-selector">
+        <label class="filter-label" for="month-select">Mes:</label>
+        <select id="month-select" class="filter-select" aria-label="Seleccionar mes">
+          <option value="Enero">Enero 2026</option>
+          <option value="Febrero">Febrero 2026</option>
+          <option value="Marzo">Marzo 2026</option>
+          <option value="Abril" selected>Abril 2026</option>
+          <option value="Mayo">Mayo 2026</option>
+          <option value="Junio">Junio 2026</option>
+          <option value="Julio">Julio 2026</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- KPI Cards Dealer -->
+    <div class="dealer-kpis-grid">
+
+      <!-- MATRIZ -->
+      <div class="dealer-card dealer-matriz">
+        <div class="dealer-card-header" style="display:flex; align-items:center;">
+          <div class="dealer-icon">M</div>
+          <div>
+            <span class="dealer-name">Dealer Matriz</span>
+            <span class="dealer-obj">Objetivo: <strong id="obj-matriz">50</strong> reclamos</span>
+          </div>
+          <img src="logo-matriz.png" alt="Logo Matriz" style="margin-left:auto; height:60px; object-fit:contain; max-width:180px;" onerror="this.style.display='none'">
+        </div>
+        <div class="dealer-progress-wrap">
+          <div class="dealer-progress-nums">
+            <span class="progress-current" id="total-matriz">—</span>
+            <span class="progress-sep">/</span>
+            <span class="progress-goal" id="goal-matriz">50</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill fill-matriz" id="bar-matriz" style="width:0%"></div>
+          </div>
+          <div class="progress-pct" id="pct-matriz">0%</div>
+        </div>
+        <div class="dealer-faltantes">
+          Faltantes: <strong id="faltantes-matriz">—</strong>
+        </div>
+      </div>
+
+      <!-- PONIENTE -->
+      <div class="dealer-card dealer-poniente">
+        <div class="dealer-card-header" style="display:flex; align-items:center;">
+          <div class="dealer-icon" style="background:linear-gradient(135deg,#1a6bb5,#2980B9)">P</div>
+          <div>
+            <span class="dealer-name">Dealer Poniente</span>
+            <span class="dealer-obj">Objetivo: <strong id="obj-poniente">20</strong> reclamos</span>
+          </div>
+          <img src="logo-poniente.png" alt="Logo Poniente" style="margin-left:auto; height:60px; object-fit:contain; max-width:180px;" onerror="this.style.display='none'">
+        </div>
+        <div class="dealer-progress-wrap">
+          <div class="dealer-progress-nums">
+            <span class="progress-current" id="total-poniente">—</span>
+            <span class="progress-sep">/</span>
+            <span class="progress-goal" id="goal-poniente">20</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill fill-poniente" id="bar-poniente" style="width:0%"></div>
+          </div>
+          <div class="progress-pct" id="pct-poniente">0%</div>
+        </div>
+        <div class="dealer-faltantes">
+          Faltantes: <strong id="faltantes-poniente">—</strong>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ─── Tabla de campañas (AS en Concurso) ─── -->
+    <div class="section-header" style="margin-top:28px">
+      <h2 class="section-title">AS en Concurso – Detalle por Campaña</h2>
+    </div>
+
+    <div class="table-wrap">
+      <table id="campaigns-table" aria-label="Reclamos por acción de servicio">
+        <thead>
+          <tr>
+            <th rowspan="2" style="width:200px">Acción de Servicio</th>
+            <th colspan="2">Enero</th>
+            <th colspan="2">Febrero</th>
+            <th colspan="2">Marzo</th>
+            <th colspan="2">Abril</th>
+            <th colspan="2">Mayo</th>
+            <th colspan="2">Junio</th>
+            <th colspan="2">Julio</th>
+          </tr>
+          <tr>
+            <!-- Enero -->
+            <th class="sub-matriz">Matriz</th><th class="sub-poniente">Poniente</th>
+            <!-- Febrero -->
+            <th class="sub-matriz">Matriz</th><th class="sub-poniente">Poniente</th>
+            <!-- Marzo -->
+            <th class="sub-matriz">Matriz</th><th class="sub-poniente">Poniente</th>
+            <!-- Abril -->
+            <th class="sub-matriz">Matriz</th><th class="sub-poniente">Poniente</th>
+            <!-- Mayo -->
+            <th class="sub-matriz">Matriz</th><th class="sub-poniente">Poniente</th>
+            <!-- Junio -->
+            <th class="sub-matriz">Matriz</th><th class="sub-poniente">Poniente</th>
+            <!-- Julio -->
+            <th class="sub-matriz">Matriz</th><th class="sub-poniente">Poniente</th>
+          </tr>
+          <tr class="tr-objetivo">
+            <td>OBJETIVO</td>
+            <!-- 7 meses × 2 dealers -->
+            <td class="sub-matriz obj-val">50</td><td class="sub-poniente obj-val">20</td>
+            <td class="sub-matriz obj-val">50</td><td class="sub-poniente obj-val">20</td>
+            <td class="sub-matriz obj-val">50</td><td class="sub-poniente obj-val">20</td>
+            <td class="sub-matriz obj-val">50</td><td class="sub-poniente obj-val">20</td>
+            <td class="sub-matriz obj-val">50</td><td class="sub-poniente obj-val">20</td>
+            <td class="sub-matriz obj-val">50</td><td class="sub-poniente obj-val">20</td>
+            <td class="sub-matriz obj-val">50</td><td class="sub-poniente obj-val">20</td>
+          </tr>
+        </thead>
+        <tbody id="campaigns-body">
+          <tr><td colspan="15" class="loading-row">
+            <div class="spinner"></div> <span>Cargando campañas…</span>
+          </td></tr>
+        </tbody>
+        <tfoot id="campaigns-tfoot"></tfoot>
+      </table>
+    </div>
+
+    <!-- Simbología eliminada -->
+
+  </div>
+</section>
+
+<!-- ================================================================
+     TAB 2 – BASE MATRIZ (1478 VINs)
+================================================================ -->
+<section class="tab-content" id="tab-content-matriz">
+  <div class="page-wrap">
+
+    <div class="section-header">
+      <h2 class="section-title">Base de datos – General</h2>
+      <div style="display:flex; gap:12px; align-items:center">
+        <div id="matriz-summary" style="font-size:0.8rem; color:var(--text-secondary)"></div>
+        <button id="btn-nuevo-vin" class="btn-export" style="background:var(--c-contact); border-color:var(--c-contact); color:white; font-weight:700;">
+          <span style="font-size:1.1rem; margin-right:6px">+</span> Nuevo VIN
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI cards base -->
+    <div class="kpis-grid" id="base-kpis-grid" style="margin-bottom:16px"></div>
+
+    <!-- Barra progreso contacto -->
+    <div class="progress-global-wrap" style="margin-bottom:16px">
+      <div class="progress-label-row">
+        <span>Avance de contacto (base total)</span>
+        <span id="progress-pct-label">0%</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- Controles -->
+    <div class="controls-inner" style="margin-bottom:16px">
+      <div class="search-wrap">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="search-input" class="search-input" placeholder="Buscar VIN, cliente, ciudad, modelo…" autocomplete="off" aria-label="Buscar VIN" />
+        <button id="search-clear" class="search-clear" style="display:none" aria-label="Limpiar búsqueda">✕</button>
+      </div>
+      <div class="filters-row">
+        <label class="filter-label" for="filter-estado">Estado:</label>
+        <select id="filter-estado" class="filter-select" aria-label="Filtrar por estado"><option value="">Todos los estados</option></select>
+
+        <label class="filter-label" for="filter-contacto">Contacto:</label>
+        <select id="filter-contacto" class="filter-select" aria-label="Filtrar por contacto">
+          <option value="">Todos</option>
+          <option value="CONTACTADO">Contactado</option>
+          <option value="NO CONTACTADO">No Contactado</option>
+        </select>
+
+        <label class="filter-label" for="filter-modelo">Modelo:</label>
+        <select id="filter-modelo" class="filter-select" aria-label="Filtrar por modelo"><option value="">Todos los modelos</option></select>
+
+        <button id="btn-reset" class="btn-reset" aria-label="Limpiar filtros">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+          Limpiar
+        </button>
+          <button id="btn-export" class="btn-export" aria-label="Exportar CSV">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Exportar CSV
+          </button>
+      </div>
+      <div class="results-count-row"><span id="results-count">Cargando…</span></div>
+    </div>
+
+    <div class="table-wrap">
+      <table id="vin-table" aria-label="Tabla de VINs base Matriz">
+        <thead>
+          <tr>
+            <th data-col="idx" class="sortable"># <span class="sort-icon">↕</span></th>
+            <th data-col="vin" class="sortable">VIN <span class="sort-icon">↕</span></th>
+            <th data-col="descripcion" class="sortable">Descripción <span class="sort-icon">↕</span></th>
+            <th data-col="modelo" class="sortable">Año <span class="sort-icon">↕</span></th>
+            <th data-col="cliente" class="sortable">Cliente <span class="sort-icon">↕</span></th>
+            <th data-col="ciudad" class="sortable">Ciudad <span class="sort-icon">↕</span></th>
+            <th data-col="estado" class="sortable">Estado <span class="sort-icon">↕</span></th>
+            <th data-col="contactado" class="sortable">Contacto <span class="sort-icon">↕</span></th>
+            <th>Cita</th>
+            <th>Observación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="table-body">
+          <tr><td colspan="11" class="loading-row">
+            <div class="spinner"></div><span>Cargando VINs…</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Paginación -->
+    <div class="pagination-wrap" id="pagination-wrap" style="display:none">
+      <button id="btn-prev" class="btn-page" aria-label="Anterior">‹ Anterior</button>
+      <div class="page-numbers" id="page-numbers"></div>
+      <button id="btn-next" class="btn-page" aria-label="Siguiente">Siguiente ›</button>
+      <select id="page-size-select" class="filter-select" aria-label="Registros por página" style="width:auto">
+        <option value="25">25 / pág</option>
+        <option value="50" selected>50 / pág</option>
+        <option value="100">100 / pág</option>
+        <option value="200">200 / pág</option>
+      </select>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================================================================
+     TAB 3 – VINs EN PROCESO (hoja KPIS)
+================================================================ -->
+<section class="tab-content" id="tab-content-proceso">
+  <div class="page-wrap">
+
+    <div class="section-header">
+      <h2 class="section-title">VINs en Seguimiento de Proceso</h2>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select id="filter-proceso" class="filter-select" aria-label="Filtrar por proceso">
+          <option value="">Todos los procesos</option>
+          <option value="NO SHOW">🔴 NO SHOW</option>
+          <option value="EN PROCESO">🟡 EN PROCESO</option>
+          <option value="EN ESPERA DE REFACCIONES">🟢 EN ESPERA DE REFACCIONES</option>
+          <option value="REALIZADO Y RECLAMADO">⬜ REALIZADO Y RECLAMADO</option>
+        </select>
+        <select id="filter-agente" class="filter-select" aria-label="Filtrar por agente">
+          <option value="">Todos los agentes</option>
+        </select>
+        <button id="btn-export-proceso" class="btn-export" aria-label="Exportar CSV proceso">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Exportar
+        </button>
+      </div>
+    </div>
+
+    <!-- KPIs mini proceso -->
+    <div class="proceso-kpis" id="proceso-kpis"></div>
+
+    <div class="table-wrap" style="margin-top:16px">
+      <table id="proceso-table" aria-label="VINs en proceso">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>VIN</th>
+            <th>CLIENTE</th>
+            <th>EN QUE PROCESO VA</th>
+            <th>FECHA CITA</th>
+            <th>FECHA ACTUALIZACIÓN</th>
+            <th>UNIDAD</th>
+            <th>ACCIONES DE SERVICIO</th>
+            <th>AGENTE</th>
+            <th>COMENTARIOS</th>
+          </tr>
+        </thead>
+        <tbody id="proceso-body">
+          <tr><td colspan="9" class="loading-row">
+            <div class="spinner"></div> <span>Cargando…</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</section>
+
+<!-- ========== MODAL DETALLE VIN ========== -->
+<div id="modal-overlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title" style="display:none">
+  <div class="modal-box">
+    <button class="modal-close" id="modal-close" aria-label="Cerrar">✕</button>
+    <div class="modal-header">
+      <div class="modal-status-dot" id="modal-status-dot"></div>
+      <div>
+        <h2 class="modal-title" id="modal-title">VIN</h2>
+        <p class="modal-sub" id="modal-sub"></p>
+      </div>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer">
+      <div class="modal-footer-status">
+        <label class="footer-label">Estatus contacto:</label>
+        <select id="modal-contacto-select" class="filter-select">
+          <option value="NO CONTACTADO">No Contactado</option>
+          <option value="CONTACTADO">Contactado</option>
+        </select>
+      </div>
+      <div class="modal-footer-obs">
+        <label class="footer-label">Fecha Cita:</label>
+        <input type="date" id="modal-cita-input" class="filter-select" style="max-width:180px" />
+      </div>
+      <div class="modal-footer-obs">
+        <label class="footer-label">Observación:</label>
+        <input type="text" id="modal-obs-input" class="search-input" placeholder="Agregar observación…" style="max-width:360px" />
+      </div>
+      <button id="modal-save" class="btn-save">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+<!-- ========== MODAL NUEVO VIN ========== -->
+<div id="modal-nuevo-overlay" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="max-width:750px">
+    <button class="modal-close" id="modal-nuevo-close">✕</button>
+    <div class="modal-header">
+      <h2 class="modal-title">Registrar Nuevo VIN</h2>
+      <p class="modal-sub">Completa los datos del cliente y la unidad</p>
+    </div>
+    <form id="form-nuevo-vin">
+      <div class="modal-body">
+        <div class="modal-field"><label class="field-label">VIN (17 caracteres)</label><input type="text" name="vin" class="search-input" required maxlength="17" style="font-family:monospace"></div>
+        <div class="modal-field"><label class="field-label">Modelo / Descripción</label><input type="text" name="descripcion" class="search-input" placeholder="Ej. COROLLA" required></div>
+        <div class="modal-field"><label class="field-label">Año (Modelo)</label><input type="number" name="modelo" class="search-input" placeholder="Ej. 2015" required></div>
+        <div class="modal-field"><label class="field-label">Cliente</label><input type="text" name="cliente" class="search-input" required></div>
+        <div class="modal-field full-width"><label class="field-label">Dirección Completa</label><input type="text" name="direccion" class="search-input" placeholder="Calle, Colonia, Ciudad, Estado, CP"></div>
+        <div class="modal-field"><label class="field-label">Teléfono Celular</label><input type="tel" name="telcel" class="search-input"></div>
+        <div class="modal-field"><label class="field-label">Teléfono Casa / Ofic</label><input type="tel" name="telcasa" class="search-input"></div>
+        <div class="modal-field"><label class="field-label">Email</label><input type="email" name="email" class="search-input"></div>
+        <div class="modal-field"><label class="field-label">Estado de Contacto</label>
+          <select name="contactado" class="filter-select">
+            <option value="NO CONTACTADO">No Contactado</option>
+            <option value="CONTACTADO">Contactado</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="submit" class="btn-save" style="background:var(--c-contact)">Crear Registro</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ========== TOAST ========== -->
+<div id="toast" class="toast" role="alert" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
