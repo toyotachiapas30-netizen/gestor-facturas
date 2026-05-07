@@ -103,62 +103,70 @@ async function saveCampEntry(mes, dealer, camp, valor) {
 ══════════════════════════════════════════ */
 let vinDataLoaded = false; // bandera: ¿ya se cargaron los VINs?
 
+/* ── LOGS DE PROGRESO ── */
+function setStatus(msg, isError = false) {
+  const b = qs('#last-updated-badge');
+  if (b) {
+    b.textContent = msg;
+    b.style.background = isError ? '#c00' : 'rgba(255,255,255,0.1)';
+    b.style.color = isError ? '#fff' : 'rgba(255,255,255,0.7)';
+  }
+}
+
 async function loadAll() {
   try {
-    const safeJson = (url) => fetch(url, { credentials: 'same-origin' })
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} al cargar ${url}`);
-        return r.json();
-      });
+    setStatus('Conectando...');
 
-    // ── Paso 1: Cargar SOLO datos pequeños (rápido) ──────────────────────
-    const [k, p, cloudState] = await Promise.all([
-      safeJson('kpis_data.json'),
-      safeJson('vins_proceso.json'),
-      fetch(`${API}/state`, { credentials: 'same-origin' })
-        .then(r => r.ok ? r.json() : null)
-        .catch(() => null),
-    ]);
-
-    kpisData = k; procesoData = p;
-
-    if (cloudState) {
+    // 1. Cargar estado de la nube (rápido)
+    const cloudResponse = await fetch(`${API}/state`, { credentials: 'same-origin' }).catch(() => null);
+    if (cloudResponse && cloudResponse.ok) {
+      const cloudState = await cloudResponse.json();
       localEdits   = cloudState.edits      || {};
       procesoEdits = cloudState.proceso    || {};
       customVins   = cloudState.customVins || [];
       campEdits    = cloudState.camp       || {};
-      console.log('☁️ [Takata] Estado cargado desde Supabase');
+      console.log('☁️ Estado cargado desde Supabase');
     } else {
-      console.warn('💾 [Takata] Sin conexion a la nube, usando datos locales');
+      console.warn('💾 Usando datos locales (offline)');
       try { localEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')        || '{}'); } catch { localEdits = {}; }
       try { procesoEdits = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { procesoEdits = {}; }
       try { customVins   = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { customVins = []; }
       try { campEdits    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { campEdits = {}; }
     }
 
-    // Merge proceso edits
+    // 2. Cargar KPIs (rápido)
+    setStatus('Cargando KPIs...');
+    const kRes = await fetch('kpis_data.json', { credentials: 'same-origin' });
+    if (!kRes.ok) throw new Error('No se pudo cargar kpis_data.json');
+    kpisData = await kRes.json();
+
+    // 3. Cargar Proceso (rápido)
+    setStatus('Cargando proceso...');
+    const pRes = await fetch('vins_proceso.json', { credentials: 'same-origin' });
+    if (!pRes.ok) throw new Error('No se pudo cargar vins_proceso.json');
+    procesoData = await pRes.json();
+
+    // 4. Procesar datos de proceso
     Object.values(procesoEdits).forEach(pe => {
       const idx = procesoData.findIndex(r => r.vin === pe.vin);
       if (idx >= 0) Object.assign(procesoData[idx], pe);
       else procesoData.unshift(pe);
     });
 
-    // ── Renderizar inmediatamente con datos pequeños ──────────────────────
-    qs('#last-updated-badge').textContent = 'Actualizado: ' + new Date().toLocaleString('es-MX', {
-      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+    // 5. Inicializar UI principal
     initKpis();
     initProceso();
+    
+    setStatus('Actualizado: ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' }));
 
-    // ── Paso 2: Cargar VINs en segundo plano (sin bloquear) ──────────────
+    // 6. Cargar VINs en segundo plano (Pesado: 3MB)
     loadVinsBackground();
 
   } catch (err) {
-    console.error('[Takata] Error crítico en loadAll:', err);
-    qs('#last-updated-badge').textContent = '⚠ Error al cargar datos';
-    qs('#last-updated-badge').style.color = '#f55';
+    console.error('[Takata] Error crítico:', err);
+    setStatus('⚠ Error de red', true);
     qs('#campaigns-body').innerHTML = `<tr><td colspan="15" style="text-align:center;padding:20px;color:#f88">
-      Error: ${err.message}. <a href="/takata/" style="color:#fff;text-decoration:underline">Reintentar</a></td></tr>`;
+      Error al cargar datos: ${err.message}. <a href="/takata/" style="color:#fff;text-decoration:underline">Reintentar</a></td></tr>`;
   }
 }
 
@@ -170,7 +178,7 @@ async function loadVinsBackground() {
     vinData = [...customVins, ...v];
     vinDataLoaded = true;
 
-    // Auto-fill nombres en proceso desde vinData
+    // Auto-fill nombres
     procesoData.forEach(rp => {
       if (!rp.cliente) {
         const base = vinData.find(rv => rv.vin === rp.vin);
@@ -178,12 +186,8 @@ async function loadVinsBackground() {
       }
     });
 
-    // Si la pestaña Base de datos ya está activa, renderizar ahora
-    const matrizTab = qs('#tab-matriz');
-    if (matrizTab && matrizTab.classList.contains('active')) {
+    if (qs('#tab-matriz').classList.contains('active')) {
       initMatriz();
-    } else {
-      // Marcar la pestaña para que se inicialice al hacer click
       qs('#tab-btn-matriz')?.classList.add('vins-ready');
     }
     console.log(`✅ [Takata] ${vinData.length} VINs cargados en segundo plano`);
@@ -920,33 +924,29 @@ function saveModal(){
   closeModal();
 }
 
-/* ── Tabs ── */
-let matrizInited = false;
 function initTabs() {
   qsa('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       qsa('.tab-btn').forEach(b => b.classList.remove('active'));
       qsa('.tab-content').forEach(c => c.classList.remove('active'));
       btn.classList.add('active');
-      qs(`#tab-content-${btn.dataset.tab}`).classList.add('active');
+      const target = qs(`#tab-content-${btn.dataset.tab}`);
+      if (target) target.classList.add('active');
 
-      // Carga diferida de Base de datos
       if (btn.dataset.tab === 'matriz' && !matrizInited) {
         if (vinDataLoaded) {
           initMatriz();
           matrizInited = true;
         } else {
-          // Mostrar indicador de que los VINs se están cargando
           const tbody = qs('#table-body');
-          if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:24px"><div class="spinner"></div> Cargando base de datos...</td></tr>';
-          // Cuando terminen de cargar, renderizar
+          if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:24px"><div class="spinner"></div> Cargando base de datos (3MB)...</td></tr>';
           const poll = setInterval(() => {
             if (vinDataLoaded) {
               clearInterval(poll);
               initMatriz();
               matrizInited = true;
             }
-          }, 300);
+          }, 500);
         }
       }
     });
@@ -954,53 +954,47 @@ function initTabs() {
 }
 
 /* ── INIT ── */
-document.addEventListener('DOMContentLoaded', async ()=>{
-  initTabs();
-  // modal bindings
-  qs('#modal-close').addEventListener('click',closeModal);
-  qs('#modal-overlay').addEventListener('click',e=>{ if(e.target===qs('#modal-overlay')) closeModal(); });
-  qs('#modal-save').addEventListener('click',saveModal);
-  
-  // Nuevo VIN bindings
-  const btnNuevo = qs('#btn-nuevo-vin');
-  const modalNuevo = qs('#modal-nuevo-overlay');
-  const formNuevo = qs('#form-nuevo-vin');
-  
-  btnNuevo.addEventListener('click', () => modalNuevo.style.display = 'flex');
-  qs('#modal-nuevo-close').addEventListener('click', () => modalNuevo.style.display = 'none');
-  modalNuevo.addEventListener('click', e => { if(e.target === modalNuevo) modalNuevo.style.display = 'none'; });
-  
-  formNuevo.addEventListener('submit', async e => {
-    e.preventDefault();
-    const formData = new FormData(formNuevo);
-    const nuevo = Object.fromEntries(formData.entries());
-
-    if (vinData.some(r => r.vin === nuevo.vin)) {
-      toast('Error: Este VIN ya existe en la base', 'error');
-      return;
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    initTabs();
+    
+    // modal bindings
+    const mClose = qs('#modal-close'), mOverlay = qs('#modal-overlay'), mSave = qs('#modal-save');
+    if (mClose) mClose.addEventListener('click', closeModal);
+    if (mOverlay) mOverlay.addEventListener('click', e => { if(e.target===mOverlay) closeModal(); });
+    if (mSave) mSave.addEventListener('click', saveModal);
+    
+    // Nuevo VIN
+    const btnNuevo = qs('#btn-nuevo-vin'), modalNuevo = qs('#modal-nuevo-overlay'), formNuevo = qs('#form-nuevo-vin');
+    if (btnNuevo && modalNuevo && formNuevo) {
+      btnNuevo.addEventListener('click', () => modalNuevo.style.display = 'flex');
+      qs('#modal-nuevo-close')?.addEventListener('click', () => modalNuevo.style.display = 'none');
+      modalNuevo.addEventListener('click', e => { if(e.target === modalNuevo) modalNuevo.style.display = 'none'; });
+      formNuevo.addEventListener('submit', async e => {
+        e.preventDefault();
+        const nuevo = Object.fromEntries(new FormData(formNuevo).entries());
+        if (vinData.some(r => r.vin === nuevo.vin)) return toast('Error: VIN duplicado', 'error');
+        await saveCustomVin(nuevo);
+        customVins.unshift(nuevo);
+        vinData = [nuevo, ...vinData];
+        applyFilters();
+        toast('✔ VIN registrado');
+        modalNuevo.style.display = 'none';
+        formNuevo.reset();
+      });
     }
 
-    // Guardar en la nube
-    await saveCustomVin(nuevo);
+    document.addEventListener('keydown', e => { 
+      if (e.key === 'Escape') { closeModal(); if(modalNuevo) modalNuevo.style.display='none'; }
+    });
+    
+    qs('#month-select')?.addEventListener('change', e => renderCampaignsTable(e.target.value));
 
-    // Actualizar memoria local
-    customVins.unshift(nuevo);
-    vinData = [nuevo, ...vinData];
-    applyFilters();
+    // Cargar datos
+    await loadAll();
 
-    toast('✔ VIN registrado exitosamente');
-    modalNuevo.style.display = 'none';
-    formNuevo.reset();
-  });
-
-  document.addEventListener('keydown',e=>{ 
-    if(e.key==='Escape') {
-      closeModal();
-      modalNuevo.style.display = 'none';
-    }
-  });
-  
-  // month change re-renders full table
-  qs('#month-select').addEventListener('change', e=>renderCampaignsTable(e.target.value));
-  try { await loadAll(); } catch(err){ console.error(err); toast('Error cargando datos','error'); }
+  } catch (err) {
+    console.error('Error fatal init:', err);
+    setStatus('⚠ Error de script', true);
+  }
 });
