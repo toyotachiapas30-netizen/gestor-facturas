@@ -837,7 +837,8 @@ let currentVin=null;
 function openModal(vin) {
   const base=vinData.find(r=>r.vin.trim()===vin.trim()); if(!base) return;
   currentVin=base.vin; const r=merge(base);
-  const dotColor=r.contactado==='CONTACTADO'?'#1db954':'#e74c3c';
+  const c = r.contactado || 'NO CONTACTADO';
+  const dotColor = c === 'CON CITA' ? '#F1C40F' : (c === 'CONTACTADO' ? '#1db954' : '#e74c3c');
   qs('#modal-status-dot').style.cssText=`background:${dotColor};box-shadow:0 0 8px ${dotColor};width:14px;height:14px;border-radius:50%;margin-top:5px;flex-shrink:0`;
   qs('#modal-title').textContent=r.vin;
   qs('#modal-sub').textContent=`${r.descripcion} ${r.modelo}`.trim();
@@ -880,7 +881,9 @@ function saveModal(){
     observacion,
     cita: citaRaw,
   };
-  saveEdits();
+  
+  // Guardar en localStorage inmediatamente
+  localStorage.setItem('takata_edits_v2', JSON.stringify(localEdits));
 
   // ─── Auto-sync to VINs en Proceso ───
   if (citaRaw) {
