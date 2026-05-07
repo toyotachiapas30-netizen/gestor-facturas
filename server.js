@@ -21,35 +21,47 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ── Token de sesión para Takata ──
 const TAKATA_SESSION_TOKEN = 'takata_2026_toyota_secure_session';
 
-function getCookie(req, name) {
+function getTakataToken(req) {
   const cookies = req.headers.cookie || '';
-  const found = cookies.split(';').map(c => c.trim()).find(c => c.startsWith(name + '='));
-  return found ? decodeURIComponent(found.substring(name.length + 1)) : null;
+  const found = cookies.split(';').map(c => c.trim()).find(c => c.startsWith('takata_session='));
+  return found ? decodeURIComponent(found.split('=')[1]) : null;
 }
 
 function takataAuth(req, res, next) {
-  // Permitir la página de login y el endpoint de login sin autenticación
-  if (req.path === '/login.html' || req.path === '/login') return next();
+  // 1. Permitir siempre la página de login y el endpoint de login
+  // req.path aquí es relativo a /takata si se usa en app.use('/takata', ...)
+  if (req.path === '/login.html' || req.path === '/login') {
+    return next();
+  }
 
-  const token = getCookie(req, 'takata_session');
-  if (token === TAKATA_SESSION_TOKEN) return next();
+  // 2. Verificar token
+  const token = getTakataToken(req);
+  if (token === TAKATA_SESSION_TOKEN) {
+    return next();
+  }
 
-  // No autenticado: redirigir a login
+  // 3. No autenticado: si es una petición de API o JSON, devolver 401. Si es navegación, redirigir a login.
+  if (req.path.endsWith('.json') || req.headers['accept']?.includes('application/json')) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  
   res.redirect('/takata/login.html');
 }
 
-// Endpoint de login para Takata (debe ir ANTES del middleware estático)
+// Endpoint de login para Takata
 app.post('/takata/login', (req, res) => {
   const { usuario, clave } = req.body || {};
+  // Usuario: takata / Clave: toyota2026
   if (usuario === 'takata' && clave === 'toyota2026') {
     res.setHeader('Set-Cookie', `takata_session=${TAKATA_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
     res.json({ ok: true });
   } else {
-    res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    res.status(401).json({ error: 'Credenciales inválidas' });
   }
 });
 
-app.use('/takata', takataAuth, express.static(path.join(__dirname, 'seguimiento-takata'), { redirect: true }));
+// Servir la carpeta Takata protegida
+app.use('/takata', takataAuth, express.static(path.join(__dirname, 'seguimiento-takata')));
 
 // ── Rutas ─────────────────────────────────────────────────
 app.use('/api/sat',     require('./routes/sat'));
