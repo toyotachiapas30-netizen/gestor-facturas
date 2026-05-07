@@ -101,18 +101,18 @@ async function saveCampEntry(mes, dealer, camp, valor) {
 /* ══════════════════════════════════════════
    LOAD DATA
 ══════════════════════════════════════════ */
+let vinDataLoaded = false; // bandera: ¿ya se cargaron los VINs?
+
 async function loadAll() {
   try {
-    // Cargar archivos estaticos base + estado en nube en paralelo
     const safeJson = (url) => fetch(url, { credentials: 'same-origin' })
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status} al cargar ${url}`);
         return r.json();
-      })
-      .catch(err => { console.error(`[Takata] Error cargando ${url}:`, err); throw err; });
+      });
 
-    const [v, k, p, cloudState] = await Promise.all([
-      safeJson('takata_vins.json'),
+    // ── Paso 1: Cargar SOLO datos pequeños (rápido) ──────────────────────
+    const [k, p, cloudState] = await Promise.all([
       safeJson('kpis_data.json'),
       safeJson('vins_proceso.json'),
       fetch(`${API}/state`, { credentials: 'same-origin' })
@@ -120,28 +120,57 @@ async function loadAll() {
         .catch(() => null),
     ]);
 
-    vinData = v; kpisData = k; procesoData = p;
+    kpisData = k; procesoData = p;
 
     if (cloudState) {
-      // Modo nube: datos centralizados para todo el equipo
-      localEdits   = cloudState.edits    || {};
-      procesoEdits = cloudState.proceso  || {};
+      localEdits   = cloudState.edits      || {};
+      procesoEdits = cloudState.proceso    || {};
       customVins   = cloudState.customVins || [];
-      campEdits    = cloudState.camp     || {};
+      campEdits    = cloudState.camp       || {};
       console.log('☁️ [Takata] Estado cargado desde Supabase');
     } else {
-      // Fallback offline: leer del localStorage
       console.warn('💾 [Takata] Sin conexion a la nube, usando datos locales');
-      try { localEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')     || '{}'); } catch { localEdits = {}; }
+      try { localEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')        || '{}'); } catch { localEdits = {}; }
       try { procesoEdits = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { procesoEdits = {}; }
       try { customVins   = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { customVins = []; }
       try { campEdits    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { campEdits = {}; }
     }
 
-    // Merge custom records into main data
-    vinData = [...customVins, ...vinData];
+    // Merge proceso edits
+    Object.values(procesoEdits).forEach(pe => {
+      const idx = procesoData.findIndex(r => r.vin === pe.vin);
+      if (idx >= 0) Object.assign(procesoData[idx], pe);
+      else procesoData.unshift(pe);
+    });
 
-    // Auto-fill client names for process data from main vinData
+    // ── Renderizar inmediatamente con datos pequeños ──────────────────────
+    qs('#last-updated-badge').textContent = 'Actualizado: ' + new Date().toLocaleString('es-MX', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    initKpis();
+    initProceso();
+
+    // ── Paso 2: Cargar VINs en segundo plano (sin bloquear) ──────────────
+    loadVinsBackground();
+
+  } catch (err) {
+    console.error('[Takata] Error crítico en loadAll:', err);
+    qs('#last-updated-badge').textContent = '⚠ Error al cargar datos';
+    qs('#last-updated-badge').style.color = '#f55';
+    qs('#campaigns-body').innerHTML = `<tr><td colspan="15" style="text-align:center;padding:20px;color:#f88">
+      Error: ${err.message}. <a href="/takata/" style="color:#fff;text-decoration:underline">Reintentar</a></td></tr>`;
+  }
+}
+
+async function loadVinsBackground() {
+  try {
+    const r = await fetch('takata_vins.json', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const v = await r.json();
+    vinData = [...customVins, ...v];
+    vinDataLoaded = true;
+
+    // Auto-fill nombres en proceso desde vinData
     procesoData.forEach(rp => {
       if (!rp.cliente) {
         const base = vinData.find(rv => rv.vin === rp.vin);
@@ -149,23 +178,18 @@ async function loadAll() {
       }
     });
 
-    // Merge persisted proceso edits into procesoData
-    Object.values(procesoEdits).forEach(pe => {
-      const idx = procesoData.findIndex(r => r.vin === pe.vin);
-      if (idx >= 0) Object.assign(procesoData[idx], pe);
-      else procesoData.unshift(pe);
-    });
-
-    qs('#last-updated-badge').textContent = 'Actualizado: '+new Date().toLocaleString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-    initKpis();
-    initProceso();
-    initMatriz();
-
+    // Si la pestaña Base de datos ya está activa, renderizar ahora
+    const matrizTab = qs('#tab-matriz');
+    if (matrizTab && matrizTab.classList.contains('active')) {
+      initMatriz();
+    } else {
+      // Marcar la pestaña para que se inicialice al hacer click
+      qs('#tab-btn-matriz')?.classList.add('vins-ready');
+    }
+    console.log(`✅ [Takata] ${vinData.length} VINs cargados en segundo plano`);
   } catch (err) {
-    console.error('[Takata] Error crítico en loadAll:', err);
-    qs('#last-updated-badge').textContent = '⚠ Error al cargar datos';
-    qs('#last-updated-badge').style.background = '#c00';
-    qs('#campaigns-body').innerHTML = `<tr><td colspan="15" style="text-align:center;padding:20px;color:#f88">Error al cargar datos: ${err.message}. <a href="/takata/" style="color:#fff">Reintenta</a></td></tr>`;
+    console.warn('[Takata] No se pudieron cargar los VINs:', err.message);
+    vinDataLoaded = false;
   }
 }
 
@@ -897,13 +921,34 @@ function saveModal(){
 }
 
 /* ── Tabs ── */
+let matrizInited = false;
 function initTabs() {
-  qsa('.tab-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      qsa('.tab-btn').forEach(b=>b.classList.remove('active'));
-      qsa('.tab-content').forEach(c=>c.classList.remove('active'));
+  qsa('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      qsa('.tab-btn').forEach(b => b.classList.remove('active'));
+      qsa('.tab-content').forEach(c => c.classList.remove('active'));
       btn.classList.add('active');
       qs(`#tab-content-${btn.dataset.tab}`).classList.add('active');
+
+      // Carga diferida de Base de datos
+      if (btn.dataset.tab === 'matriz' && !matrizInited) {
+        if (vinDataLoaded) {
+          initMatriz();
+          matrizInited = true;
+        } else {
+          // Mostrar indicador de que los VINs se están cargando
+          const tbody = qs('#table-body');
+          if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:24px"><div class="spinner"></div> Cargando base de datos...</td></tr>';
+          // Cuando terminen de cargar, renderizar
+          const poll = setInterval(() => {
+            if (vinDataLoaded) {
+              clearInterval(poll);
+              initMatriz();
+              matrizInited = true;
+            }
+          }, 300);
+        }
+      }
     });
   });
 }
