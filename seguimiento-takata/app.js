@@ -206,7 +206,6 @@ const OBJ = { Matriz:50, Poniente:20 };
 
 /* ── campaign edits persistence ── */
 const LS_CAMP = 'takata_camp_edits_v1';
-let campEdits = {};
 
 function loadCampEdits() {
   // campEdits ya se carga desde la nube en loadAll()
@@ -924,6 +923,7 @@ function saveModal(){
   closeModal();
 }
 
+let matrizInited = false;
 function initTabs() {
   qsa('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
