@@ -584,6 +584,11 @@ async function deleteProcesoEntry(vin) {
     procesoData.splice(idx, 1);
   }
   
+  // Regresar a la base de datos como NO CONTACTADO
+  localEdits[vin] = { ...(localEdits[vin] || {}), contactado: 'NO CONTACTADO', cita: '', observacion: '' };
+  saveEdit(vin);
+  applyFilters(); // Refrescar la tabla base de datos
+  
   // 2. Guardar en localStorage
   saveProcesoEdits();
   
