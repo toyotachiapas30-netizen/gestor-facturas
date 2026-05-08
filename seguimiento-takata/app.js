@@ -795,7 +795,7 @@ function getRowBorder(r) {
 
 function renderTable() {
   const tbody = qs('#table-body');
-  if (!filtered.length) { tbody.innerHTML='<tr class="no-results-row"><td colspan="11">🔍 Sin resultados</td></tr>'; return; }
+  if (!filtered.length) { tbody.innerHTML='<tr class="no-results-row"><td colspan="12">🔍 Sin resultados</td></tr>'; return; }
   const start=(currentPage-1)*pageSize;
   const page=filtered.slice(start,start+pageSize);
   tbody.innerHTML = page.map((r,i)=>{
@@ -812,6 +812,7 @@ function renderTable() {
       <td class="muted">${getContactBadge(r)}</td>
       <td class="muted"><span class="editable-base" contenteditable="true" data-vin="${esc(r.vin)}" data-field="cita" style="color:#F1C40F;min-width:80px;display:inline-block">${r.cita?esc(fmtDate(r.cita)):'—'}</span></td>
       <td class="muted"><span class="editable-base" data-vin="${esc(r.vin)}" data-field="dealer" style="min-width:80px;display:inline-block">${esc(r.dealer)||'—'}</span></td>
+      <td class="muted"><span style="background:var(--bg-input);border-radius:4px;padding:2px 6px;font-size:0.75rem;font-weight:600">${esc(r.acciones)||'—'}</span></td>
       <td class="muted" style="min-width:180px;max-width:320px;line-height:1.3" title="${esc(r.observacion)}">
         <div class="editable-base" contenteditable="true" data-vin="${esc(r.vin)}" data-field="observacion" style="min-width:100px;min-height:1em">${esc(r.observacion)||''}</div>
       </td>
