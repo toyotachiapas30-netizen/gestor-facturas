@@ -83,6 +83,11 @@ router.post('/proceso', async (req, res) => {
     const { vin, ...fields } = req.body;
     if (!vin) return res.status(400).json({ error: 'vin requerido' });
 
+    // Eliminar campos que vienen del frontend pero no pertenecen a esta tabla
+    delete fields.dealer;
+    delete fields.distribuidor;
+    delete fields.contactado;
+
     const { error } = await sb().from('takata_proceso_edits').upsert({
       vin,
       ...fields,
