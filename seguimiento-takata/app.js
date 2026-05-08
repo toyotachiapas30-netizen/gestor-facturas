@@ -73,7 +73,6 @@ async function saveProcesoEntry(vin) {
   const payload = {
     vin: entry.vin,
     proceso: entry.proceso,
-    proc_color: entry.proc_color,
     cita: entry.cita,
     actualizacion: entry.actualizacion,
     unidad: entry.unidad,
