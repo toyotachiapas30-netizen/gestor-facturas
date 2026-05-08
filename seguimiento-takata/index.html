@@ -255,6 +255,7 @@
             <th data-col="estado" class="sortable">Estado <span class="sort-icon">↕</span></th>
             <th data-col="contactado" class="sortable">Contacto <span class="sort-icon">↕</span></th>
             <th>Cita</th>
+            <th>Distribuidor</th>
             <th>Observación</th>
             <th>Acciones</th>
           </tr>
@@ -321,6 +322,7 @@
             <th>CLIENTE</th>
             <th>EN QUE PROCESO VA</th>
             <th>FECHA CITA</th>
+            <th>DISTRIBUIDOR</th>
             <th>FECHA ACTUALIZACIÓN</th>
             <th>UNIDAD</th>
             <th>ACCIONES DE SERVICIO</th>
@@ -363,6 +365,14 @@
       <div class="modal-footer-obs">
         <label class="footer-label">Fecha Cita:</label>
         <input type="date" id="modal-cita-input" class="filter-select" style="max-width:180px" />
+      </div>
+      <div class="modal-footer-obs">
+        <label class="footer-label">Distribuidor:</label>
+        <select id="modal-dealer-select" class="filter-select">
+          <option value="">— Seleccionar —</option>
+          <option value="Chiapas">Chiapas</option>
+          <option value="Poniente">Poniente</option>
+        </select>
       </div>
       <div class="modal-footer-obs">
         <label class="footer-label">Observación:</label>

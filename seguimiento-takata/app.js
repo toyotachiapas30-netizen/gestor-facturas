@@ -450,6 +450,7 @@ function renderProceso() {
       <td style="min-width:150px;max-width:250px;line-height:1.3" title="${esc(r.cliente)}">${esc(r.cliente)||'—'}</td>
       <td>${badge}</td>
       <td class="muted">${r.cita||'—'}</td>
+      <td class="muted" style="color:#3498DB">${esc(r.dealer)||'—'}</td>
       <td class="muted"><span class="editable-cell" contenteditable="true" data-vin="${esc(r.vin)}" data-field="actualizacion" style="background:var(--bg-input);border-radius:4px;padding:2px 8px;font-size:.75rem;display:inline-block;min-width:75px">${r.actualizacion ? esc(r.actualizacion) : '—'}</span></td>
       <td>${esc(r.unidad)}</td>
       <td class="muted">${actionsHtml}</td>
@@ -569,11 +570,11 @@ function updateVinActions(vin, actionsString) {
 }
 
 function exportProceso() {
-  const hdr = ['VIN','Cliente','Proceso','Fecha Cita','Fecha Actualización','Unidad','Acciones','Agente','Comentario'];
+  const hdr = ['VIN','Cliente','Proceso','Fecha Cita','Distribuidor','Fecha Actualización','Unidad','Acciones','Agente','Comentario'];
   const fp = qs('#filter-proceso').value.toLowerCase();
   const fa = qs('#filter-agente').value;
   const rows = procesoData.filter(r=>(!fp||r.proceso.toLowerCase().includes(fp))&&(!fa||r.agente===fa));
-  const csv = [hdr.join(','), ...rows.map(r=>[r.vin,r.cliente,r.proceso,r.cita,r.actualizacion,r.unidad,r.acciones,r.agente,r.comentario].map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(','))].join('\r\n');
+  const csv = [hdr.join(','), ...rows.map(r=>[r.vin,r.cliente,r.proceso,r.cita,r.dealer,r.actualizacion,r.unidad,r.acciones,r.agente,r.comentario].map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(','))].join('\r\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
   a.download=`takata_proceso_${new Date().toISOString().slice(0,10)}.csv`; a.click();
@@ -705,6 +706,7 @@ function renderTable() {
       <td class="muted">${esc(r.estado)}</td>
       <td class="muted">${getContactBadge(r)}</td>
       <td class="muted"><span class="editable-base" contenteditable="true" data-vin="${esc(r.vin)}" data-field="cita" style="color:#F1C40F;min-width:80px;display:inline-block">${r.cita?esc(fmtDate(r.cita)):'—'}</span></td>
+      <td class="muted"><span class="editable-base" data-vin="${esc(r.vin)}" data-field="dealer" style="min-width:80px;display:inline-block">${esc(r.dealer)||'—'}</span></td>
       <td class="muted" style="min-width:180px;max-width:320px;line-height:1.3" title="${esc(r.observacion)}">
         <div class="editable-base" contenteditable="true" data-vin="${esc(r.vin)}" data-field="observacion" style="min-width:100px;min-height:1em">${esc(r.observacion)||''}</div>
       </td>
@@ -779,6 +781,7 @@ function syncToProceso(vin, citaRaw, obs) {
     cliente:     merged.cliente || '',
     proceso:     existing?.proceso || 'EN PROCESO',
     cita:        citaDisplay,
+    dealer:      merged.dealer || '',
     actualizacion: new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'}),
     unidad:      `${merged.descripcion||''} ${merged.modelo||''}`.trim(),
     acciones:    merged.acciones || '23TA15',
@@ -824,8 +827,8 @@ function updateCount() {
 }
 
 function exportCSV() {
-  const hdr=['VIN','Descripcion','Modelo','Cliente','Ciudad','Estado','CP','Email','TelCel','TelCasa','Contactado','Cita','Observacion'];
-  const csv=[hdr.join(','),...filtered.map(r=>[r.vin,r.descripcion,r.modelo,r.cliente,r.ciudad,r.estado,r.cp,r.email,r.telcel,r.telcasa,r.contactado,fmtDate(r.cita),r.observacion].map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(','))].join('\r\n');
+  const hdr=['VIN','Descripcion','Modelo','Cliente','Ciudad','Estado','CP','Email','TelCel','TelCasa','Contactado','Cita','Distribuidor','Observacion'];
+  const csv=[hdr.join(','),...filtered.map(r=>[r.vin,r.descripcion,r.modelo,r.cliente,r.ciudad,r.estado,r.cp,r.email,r.telcel,r.telcasa,r.contactado,fmtDate(r.cita),r.dealer,r.observacion].map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(','))].join('\r\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
   a.download=`takata_matriz_${new Date().toISOString().slice(0,10)}.csv`; a.click();
@@ -851,8 +854,10 @@ function openModal(vin) {
     <div class="modal-field"><span class="field-label">Teléfonos</span><span class="field-value">${tel||'—'}</span></div>
     <div class="modal-field"><span class="field-label">Email</span><span class="field-value">${r.email?`<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>`:'—'}</span></div>
     <div class="modal-field"><span class="field-label">Cita</span><span class="field-value" style="color:#F1C40F">${fmtDate(r.cita)}</span></div>
+    <div class="modal-field"><span class="field-label">Distribuidor</span><span class="field-value" style="color:#3498DB">${esc(r.dealer)||'—'}</span></div>
     <div class="modal-field full-width"><span class="field-label">Observación</span><span class="field-value">${esc(r.observacion)||'—'}</span></div>`;
   qs('#modal-contacto-select').value=r.contactado||'NO CONTACTADO';
+  qs('#modal-dealer-select').value=localEdits[r.vin]?.dealer||r.dealer||'';
   qs('#modal-obs-input').value=localEdits[r.vin]?.observacion??r.observacion??'';
   // Pre-fill cita: stored as yyyy-mm-dd in localEdits, or empty
   const citaVal = localEdits[r.vin]?.cita ?? '';
@@ -864,6 +869,7 @@ function closeModal(){ qs('#modal-overlay').style.display='none'; currentVin=nul
 function saveModal(){
   if(!currentVin) return;
   const contactado = qs('#modal-contacto-select').value;
+  const dealer = qs('#modal-dealer-select').value;
   const observacion = qs('#modal-obs-input').value.trim();
   const citaRaw = qs('#modal-cita-input').value.trim(); // yyyy-mm-dd or empty
 
@@ -878,6 +884,7 @@ function saveModal(){
   localEdits[currentVin] = {
     ...localEdits[currentVin],
     contactado,
+    dealer,
     observacion,
     cita: citaRaw,
   };
@@ -896,6 +903,7 @@ function saveModal(){
       cliente:     merged.cliente || '',
       proceso:     existing?.proceso || 'EN PROCESO',
       cita:        citaDisplay,
+      dealer:      dealer,
       actualizacion: new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'}),
       unidad:      `${merged.descripcion||''} ${merged.modelo||''}`.trim(),
       acciones:    merged.acciones || '23TA15',
