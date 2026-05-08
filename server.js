@@ -64,8 +64,15 @@ app.post('/takata/login', (req, res) => {
   }
 });
 
-// Servir la carpeta Takata protegida
+// Servir la carpeta Takata protegida (páginas HTML/JS/CSS)
 app.use('/takata', takataAuth, express.static(path.join(__dirname, 'seguimiento-takata')));
+
+// ── Auth para rutas API de Takata (siempre devuelve 401 JSON, no redirige) ──
+function takataApiAuth(req, res, next) {
+  const token = getTakataToken(req);
+  if (token === TAKATA_SESSION_TOKEN) return next();
+  return res.status(401).json({ error: 'No autorizado. Inicia sesión en /takata/' });
+}
 
 // ── Rutas ─────────────────────────────────────────────────
 app.use('/api/sat',     require('./routes/sat'));
@@ -75,7 +82,7 @@ app.use('/api/autotec', require('./routes/autotec-buzon'));
 app.use('/api/portal',  require('./routes/autotec-portal'));
 app.use('/api/mail',    require('./routes/mail'));
 app.use('/api/gastos',  require('./routes/gastos'));
-app.use('/api/takata',  require('./routes/takata'));
+app.use('/api/takata',  takataApiAuth, require('./routes/takata')); // ← Protegida
 
 // ── Fallback para el Frontend ──────────────────────────────
 app.get('*', (req, res) => {
