@@ -552,7 +552,6 @@ function renderProceso() {
         cell.blur();
       }
     });
-    });
   });
 
   // Bind delete buttons
