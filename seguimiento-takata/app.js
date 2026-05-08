@@ -408,6 +408,36 @@ function renderProceso() {
     </div>`
   ).join('');
 
+  // ── Contador de acciones de servicio por tipo ──
+  const ALL_ACTIONS = ['23TA15','DSF','G0P','F0L','24TM01','23TM01','C0M','E0M','HMA'];
+  const actionColors = {
+    '23TA15':'#EB001B','DSF':'#3498DB','G0P':'#27AE60','F0L':'#9B59B6',
+    '24TM01':'#E67E22','23TM01':'#E91E63','C0M':'#00BCD4','E0M':'#FF9800','HMA':'#8BC34A'
+  };
+  const actionCounts = {};
+  ALL_ACTIONS.forEach(a => actionCounts[a] = 0);
+  procesoData.forEach(r => {
+    const parts = (r.acciones || '').split(/[,+]/).map(s => s.trim().replace('ACS ','').toUpperCase());
+    parts.forEach(p => { if (actionCounts[p] !== undefined) actionCounts[p]++; });
+  });
+  const accionesEl = qs('#acciones-kpis');
+  if (accionesEl) {
+    accionesEl.innerHTML = ALL_ACTIONS
+      .filter(a => actionCounts[a] > 0)
+      .map(a => {
+        const col = actionColors[a] || '#888';
+        return `<div style="
+          display:flex; align-items:center; gap:6px;
+          background:${col}18; border:1px solid ${col}44;
+          border-radius:999px; padding:4px 12px;
+          font-size:.72rem; font-weight:700; color:${col};
+        ">
+          <span style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></span>
+          ${a} <span style="font-size:.85rem;margin-left:2px">${actionCounts[a]}</span>
+        </div>`;
+      }).join('');
+  }
+
   const tbody = qs('#proceso-body');
   if (!rows.length) { tbody.innerHTML='<tr class="no-results-row"><td colspan="9">Sin registros</td></tr>'; return; }
 
@@ -639,18 +669,19 @@ function applyFilters() {
 }
 
 function updateBaseKpis(rows) {
-  const total  = rows.length;
-  const cont   = rows.filter(r=>r.contactado==='CONTACTADO').length;
-  const noCont = total-cont;
-  const conCita= rows.filter(r=>r.cita&&r.cita!=='').length;
-  const progP  = total?Math.round(cont/total*100):0;
+  const total   = rows.length;
+  const conCita = rows.filter(r => r.cita && r.cita !== '').length;
+  const contPuro= rows.filter(r => r.contactado === 'CONTACTADO' && !(r.cita && r.cita !== '')).length;
+  const cont    = contPuro + conCita; // Contactados + Con Cita juntos
+  const noCont  = total - cont;
+  const progP   = total ? Math.round(cont / total * 100) : 0;
 
   qs('#base-kpis-grid').innerHTML = [
     {label:'Total VINs',   val:total.toLocaleString('es-MX'),  cls:'kpi-c1', p:''},
-    {label:'Contactados',  val:cont.toLocaleString('es-MX'),   cls:'kpi-c2', p:pct(cont,total)},
+    {label:'Contactados',  val:cont.toLocaleString('es-MX'),   cls:'kpi-c2', p:pct(cont,total), tip:'Incluye con cita'},
     {label:'Sin Contactar',val:noCont.toLocaleString('es-MX'), cls:'kpi-c3', p:pct(noCont,total)},
     {label:'Con Cita',     val:conCita.toLocaleString('es-MX'),cls:'kpi-c4', p:pct(conCita,total)},
-  ].map(k=>`<div class="kpi-card ${k.cls}">
+  ].map(k=>`<div class="kpi-card ${k.cls}" title="${k.tip||''}">
     <div class="kpi-body"><span class="kpi-label">${k.label}</span><span class="kpi-value">${k.val}</span>${k.p?`<span class="kpi-pct">${k.p}</span>`:''}</div>
   </div>`).join('');
 
