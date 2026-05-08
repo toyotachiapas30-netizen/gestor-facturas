@@ -6,6 +6,9 @@ let localEdits = {};
 let filtered = [], currentPage = 1, pageSize = 50;
 let sortCol = null, sortDir = 'asc';
 
+// Detectar si el usuario actual es de solo lectura
+const isReadOnly = document.cookie.includes('takata_role=readonly');
+
 const qs  = (s, c=document) => c.querySelector(s);
 const qsa = (s, c=document) => [...c.querySelectorAll(s)];
 
@@ -145,6 +148,11 @@ async function loadAll() {
       try { procesoEdits = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { procesoEdits = {}; }
       try { customVins   = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { customVins = []; }
       try { campEdits    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { campEdits = {}; }
+    }
+
+    if (isReadOnly) {
+      const btnNuevoVin = qs('#btn-nuevo-vin');
+      if (btnNuevoVin) btnNuevoVin.style.display = 'none';
     }
 
     // 2. Cargar KPIs (rápido)
@@ -485,7 +493,9 @@ function renderProceso() {
 
   tbody.innerHTML = rows.map((r,i) => {
     const info = getProcInfo(r.proceso);
-    const badge = `
+    const badge = isReadOnly ? `
+      <div class="status-select ${info.cls}" style="border:1px solid ${info.css}22; background:${info.css}11; color:${info.css}; font-weight:700; border-radius:999px; padding:2px 8px; font-size:.72rem; display:inline-block">${r.proceso||'— Sin info —'}</div>
+    ` : `
       <select class="status-select ${info.cls}" data-vin="${esc(r.vin)}" style="border:1px solid ${info.css}22; background:${info.css}11; color:${info.css}; font-weight:700; border-radius:999px; padding:2px 8px; cursor:pointer; font-size:.72rem; outline:none">
         <option value="" ${!r.proceso?'selected':''}>— Sin info —</option>
         ${Object.keys(PROC_COLORS).map(status => 
@@ -500,10 +510,11 @@ function renderProceso() {
     
     const actionsHtml = `
       <div class="actions-multi-container" style="position:relative; display:inline-block">
-        <div class="actions-trigger" data-vin="${esc(r.vin)}" style="cursor:pointer; background:var(--bg-input); padding:4px 10px; border-radius:6px; font-size:.73rem; border:1px solid var(--border); display:flex; align-items:center; gap:6px">
+        <div class="actions-trigger" data-vin="${esc(r.vin)}" style="cursor:${isReadOnly ? 'default' : 'pointer'}; background:var(--bg-input); padding:4px 10px; border-radius:6px; font-size:.73rem; border:1px solid var(--border); display:flex; align-items:center; gap:6px">
           <span style="max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${currentActions.join(', ') || 'Sin acciones'}</span>
           ${actionsCount > 0 ? `<b style="background:var(--red); color:white; border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; font-size:.65rem">${actionsCount}</b>` : ''}
         </div>
+        ${isReadOnly ? '' : `
         <div class="actions-dropdown" id="drop-${esc(r.vin)}" style="display:none; position:absolute; top:100%; left:0; z-index:100; background:var(--bg-surface); border:1px solid var(--border); border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,.2); padding:10px; min-width:180px">
           <div style="font-weight:700; font-size:.7rem; margin-bottom:8px; color:var(--text-3); text-transform:uppercase">Seleccionar Acciones</div>
           ${allPossibleActions.map(act => `
@@ -513,6 +524,7 @@ function renderProceso() {
             </label>
           `).join('')}
         </div>
+        `}
       </div>
     `;
 
@@ -523,15 +535,17 @@ function renderProceso() {
       <td>${badge}</td>
       <td class="muted">${r.cita||'—'}</td>
       <td class="muted" style="color:#3498DB">${esc(r.dealer)||'—'}</td>
-      <td class="muted"><span class="editable-cell" contenteditable="true" data-vin="${esc(r.vin)}" data-field="actualizacion" style="background:var(--bg-input);border-radius:4px;padding:2px 8px;font-size:.75rem;display:inline-block;min-width:75px">${r.actualizacion ? esc(r.actualizacion) : '—'}</span></td>
+      <td class="muted"><span class="${isReadOnly ? '' : 'editable-cell'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="actualizacion" style="background:var(--bg-input);border-radius:4px;padding:2px 8px;font-size:.75rem;display:inline-block;min-width:75px">${r.actualizacion ? esc(r.actualizacion) : '—'}</span></td>
       <td>${esc(r.unidad)}</td>
       <td class="muted">${actionsHtml}</td>
-      <td><span class="editable-cell" contenteditable="true" data-vin="${esc(r.vin)}" data-field="agente" style="background:var(--bg-input);border-radius:4px;padding:2px 8px;font-size:.75rem;display:inline-block;min-width:60px">${esc(r.agente)}</span></td>
-      <td class="muted" style="min-width:200px;max-width:350px;line-height:1.3"><div class="editable-cell" contenteditable="true" data-vin="${esc(r.vin)}" data-field="comentario" style="min-width:100%;min-height:1em;word-wrap:break-word">${esc(r.comentario)||''}</div></td>
+      <td><span class="${isReadOnly ? '' : 'editable-cell'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="agente" style="background:var(--bg-input);border-radius:4px;padding:2px 8px;font-size:.75rem;display:inline-block;min-width:60px">${esc(r.agente)}</span></td>
+      <td class="muted" style="min-width:200px;max-width:350px;line-height:1.3"><div class="${isReadOnly ? '' : 'editable-cell'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="comentario" style="min-width:100%;min-height:1em;word-wrap:break-word">${esc(r.comentario)||''}</div></td>
       <td>
+        ${isReadOnly ? '' : `
         <button class="btn-delete-proceso" data-vin="${esc(r.vin)}" title="Eliminar de Proceso" style="background:transparent; border:none; color:var(--red); cursor:pointer; font-size:1.1rem; padding:4px; opacity:0.6; transition:opacity 0.2s;">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
         </button>
+        `}
       </td>
     </tr>`;
   }).join('');
@@ -830,11 +844,11 @@ function renderTable() {
       <td class="muted">${esc(r.ciudad)}</td>
       <td class="muted">${esc(r.estado)}</td>
       <td class="muted">${getContactBadge(r)}</td>
-      <td class="muted"><span class="editable-base" contenteditable="true" data-vin="${esc(r.vin)}" data-field="cita" style="color:#F1C40F;min-width:80px;display:inline-block">${r.cita?esc(fmtDate(r.cita)):'—'}</span></td>
-      <td class="muted"><span class="editable-base" data-vin="${esc(r.vin)}" data-field="dealer" style="min-width:80px;display:inline-block">${esc(r.dealer)||'—'}</span></td>
+      <td class="muted"><span class="${isReadOnly ? '' : 'editable-base'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="cita" style="color:#F1C40F;min-width:80px;display:inline-block">${r.cita?esc(fmtDate(r.cita)):'—'}</span></td>
+      <td class="muted"><span class="${isReadOnly ? '' : 'editable-base'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="dealer" style="min-width:80px;display:inline-block">${esc(r.dealer)||'—'}</span></td>
       <td class="muted"><span style="background:var(--bg-input);border-radius:4px;padding:2px 6px;font-size:0.75rem;font-weight:600">${esc(r.acciones)||'—'}</span></td>
       <td class="muted" style="min-width:180px;max-width:320px;line-height:1.3" title="${esc(r.observacion)}">
-        <div class="editable-base" contenteditable="true" data-vin="${esc(r.vin)}" data-field="observacion" style="min-width:100px;min-height:1em">${esc(r.observacion)||''}</div>
+        <div class="${isReadOnly ? '' : 'editable-base'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="observacion" style="min-width:100px;min-height:1em">${esc(r.observacion)||''}</div>
       </td>
       <td><button class="btn-action" data-vin="${esc(r.vin)}">Ver detalle</button></td>
     </tr>`;
@@ -988,12 +1002,21 @@ function openModal(vin) {
   // Pre-fill cita: stored as yyyy-mm-dd in localEdits, or empty
   const citaVal = localEdits[r.vin]?.cita ?? '';
   qs('#modal-cita-input').value = citaVal;
+  
+  if (isReadOnly) {
+    qs('#modal-contacto-select').disabled = true;
+    qs('#modal-dealer-select').disabled = true;
+    qs('#modal-obs-input').disabled = true;
+    qs('#modal-cita-input').disabled = true;
+    qs('#modal-save').style.display = 'none';
+  }
+  
   qs('#modal-overlay').style.display='flex';
 }
 function closeModal(){ qs('#modal-overlay').style.display='none'; currentVin=null; }
 
 function saveModal(){
-  if(!currentVin) return;
+  if(isReadOnly || !currentVin) return;
   const contactado = qs('#modal-contacto-select').value;
   const dealer = qs('#modal-dealer-select').value;
   const observacion = qs('#modal-obs-input').value.trim();

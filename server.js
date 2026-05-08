@@ -24,6 +24,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Token de sesión para Takata ──
 const TAKATA_SESSION_TOKEN = 'takata_2026_toyota_secure_session';
+const TAKATA_READONLY_TOKEN = 'takata_readonly_session_token';
 
 function getTakataToken(req) {
   const cookies = req.headers.cookie || '';
@@ -32,19 +33,15 @@ function getTakataToken(req) {
 }
 
 function takataAuth(req, res, next) {
-  // 1. Permitir siempre la página de login y el endpoint de login
-  // req.path aquí es relativo a /takata si se usa en app.use('/takata', ...)
   if (req.path === '/login.html' || req.path === '/login') {
     return next();
   }
 
-  // 2. Verificar token
   const token = getTakataToken(req);
-  if (token === TAKATA_SESSION_TOKEN) {
+  if (token === TAKATA_SESSION_TOKEN || token === TAKATA_READONLY_TOKEN) {
     return next();
   }
 
-  // 3. No autenticado: si es una petición de API o JSON, devolver 401. Si es navegación, redirigir a login.
   if (req.path.endsWith('.json') || req.headers['accept']?.includes('application/json')) {
     return res.status(401).json({ error: 'No autorizado' });
   }
@@ -52,26 +49,39 @@ function takataAuth(req, res, next) {
   res.redirect('/takata/login.html');
 }
 
-// Endpoint de login para Takata
 app.post('/takata/login', (req, res) => {
   const { usuario, clave } = req.body || {};
-  // Usuario: takata / Clave: toyota2026
   if (usuario === 'takata' && clave === 'toyota2026') {
-    res.setHeader('Set-Cookie', `takata_session=${TAKATA_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
-    res.json({ ok: true });
+    res.setHeader('Set-Cookie', [
+      `takata_session=${TAKATA_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`,
+      `takata_role=admin; Path=/; SameSite=Strict; Max-Age=604800`
+    ]);
+    res.json({ ok: true, role: 'admin' });
+  } else if (usuario === 'visor' && clave === 'toyota2026') {
+    res.setHeader('Set-Cookie', [
+      `takata_session=${TAKATA_READONLY_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`,
+      `takata_role=readonly; Path=/; SameSite=Strict; Max-Age=604800`
+    ]);
+    res.json({ ok: true, role: 'readonly' });
   } else {
     res.status(401).json({ error: 'Credenciales inválidas' });
   }
 });
 
-// Servir la carpeta Takata protegida (páginas HTML/JS/CSS)
 app.use('/takata', takataAuth, express.static(path.join(__dirname, 'seguimiento-takata')));
 
-// ── Auth para rutas API de Takata (siempre devuelve 401 JSON, no redirige) ──
 function takataApiAuth(req, res, next) {
   const token = getTakataToken(req);
-  if (token === TAKATA_SESSION_TOKEN) return next();
-  return res.status(401).json({ error: 'No autorizado. Inicia sesión en /takata/' });
+  if (!token || (token !== TAKATA_SESSION_TOKEN && token !== TAKATA_READONLY_TOKEN)) {
+    return res.status(401).json({ error: 'No autorizado. Inicia sesión en /takata/' });
+  }
+  
+  // Bloquear métodos de escritura si es visor
+  if (token === TAKATA_READONLY_TOKEN && req.method !== 'GET') {
+    return res.status(403).json({ error: 'Usuario de solo lectura. No tienes permisos para modificar.' });
+  }
+  
+  return next();
 }
 
 // ── Rutas ─────────────────────────────────────────────────
