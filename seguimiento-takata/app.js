@@ -191,11 +191,14 @@ async function loadVinsBackground() {
     vinData = [...customVins, ...v];
     vinDataLoaded = true;
 
-    // Auto-fill nombres
+    // Auto-fill nombres, dealer y acciones desde la base de datos principal
     procesoData.forEach(rp => {
-      if (!rp.cliente) {
-        const base = vinData.find(rv => rv.vin === rp.vin);
-        if (base) rp.cliente = base.cliente;
+      const base = vinData.find(rv => rv.vin === rp.vin);
+      if (base) {
+        const mergedBase = merge(base); // Aplica localEdits (como dealer)
+        if (!rp.cliente) rp.cliente = mergedBase.cliente;
+        if (!rp.dealer) rp.dealer = mergedBase.dealer;
+        if (!rp.acciones) rp.acciones = mergedBase.acciones;
       }
     });
 
@@ -203,6 +206,10 @@ async function loadVinsBackground() {
       initMatriz();
       qs('#tab-btn-matriz')?.classList.add('vins-ready');
     }
+    
+    // Forzar re-render de la tabla de proceso para mostrar los nombres recién cargados
+    renderProceso();
+    
     console.log(`✅ [Takata] ${vinData.length} VINs cargados en segundo plano`);
   } catch (err) {
     console.warn('[Takata] No se pudieron cargar los VINs:', err.message);
