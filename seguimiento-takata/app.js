@@ -68,7 +68,21 @@ async function saveEdit(vin) {
 async function saveProcesoEntry(vin) {
   const entry = procesoEdits[vin];
   if (!entry) return;
-  const ok = await cloudPost('proceso', entry);
+  
+  // Extraer solo los campos que existen en la tabla de la nube (evitar schema errors)
+  const payload = {
+    vin: entry.vin,
+    proceso: entry.proceso,
+    proc_color: entry.proc_color,
+    cita: entry.cita,
+    actualizacion: entry.actualizacion,
+    unidad: entry.unidad,
+    acciones: entry.acciones,
+    agente: entry.agente,
+    comentario: entry.comentario
+  };
+
+  const ok = await cloudPost('proceso', payload);
   if (!ok) {
     localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits));
   }
