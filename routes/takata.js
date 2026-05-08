@@ -98,6 +98,25 @@ router.post('/proceso', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// DELETE /api/takata/proceso/:vin
+// Elimina un VIN de la tabla de proceso
+// ══════════════════════════════════════════════════════════════
+router.delete('/proceso/:vin', async (req, res) => {
+  try {
+    const { vin } = req.params;
+    if (!vin) return res.status(400).json({ error: 'vin requerido' });
+
+    const { error } = await sb().from('takata_proceso_edits').delete().eq('vin', vin);
+
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Takata] Error DELETE /proceso:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // POST /api/takata/custom-vin
 // Agrega o actualiza un VIN nuevo creado manualmente
 // ══════════════════════════════════════════════════════════════

@@ -501,6 +501,11 @@ function renderProceso() {
       <td class="muted">${actionsHtml}</td>
       <td><span class="editable-cell" contenteditable="true" data-vin="${esc(r.vin)}" data-field="agente" style="background:var(--bg-input);border-radius:4px;padding:2px 8px;font-size:.75rem;display:inline-block;min-width:60px">${esc(r.agente)}</span></td>
       <td class="muted" style="min-width:200px;max-width:350px;line-height:1.3"><div class="editable-cell" contenteditable="true" data-vin="${esc(r.vin)}" data-field="comentario" style="min-width:100%;min-height:1em;word-wrap:break-word">${esc(r.comentario)||''}</div></td>
+      <td>
+        <button class="btn-delete-proceso" data-vin="${esc(r.vin)}" title="Eliminar de Proceso" style="background:transparent; border:none; color:var(--red); cursor:pointer; font-size:1.1rem; padding:4px; opacity:0.6; transition:opacity 0.2s;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+        </button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -547,7 +552,50 @@ function renderProceso() {
         cell.blur();
       }
     });
+    });
   });
+
+  // Bind delete buttons
+  qsa('.btn-delete-proceso').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const vin = btn.dataset.vin;
+      if (confirm(`¿Estás seguro de que deseas eliminar el VIN ${vin} del seguimiento de proceso?`)) {
+        deleteProcesoEntry(vin);
+      }
+    });
+    // Add hover effect
+    btn.addEventListener('mouseenter', () => btn.style.opacity = '1');
+    btn.addEventListener('mouseleave', () => btn.style.opacity = '0.6');
+  });
+}
+
+async function deleteProcesoEntry(vin) {
+  // 1. Remover de memoria
+  delete procesoEdits[vin];
+  const idx = procesoData.findIndex(r => r.vin === vin);
+  if (idx >= 0) {
+    procesoData.splice(idx, 1);
+  }
+  
+  // 2. Guardar en localStorage
+  saveProcesoEdits();
+  
+  // 3. Renderizar vista inmediatamente
+  renderProceso();
+  
+  // 4. Borrar de la BD (Supabase)
+  try {
+    const res = await fetch(`/api/takata/proceso/${vin}`, {
+      method: 'DELETE',
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!res.ok) throw new Error('Error al borrar en BD');
+    toast('✔ VIN eliminado de Proceso');
+  } catch(e) {
+    console.error('Error deleteProcesoEntry:', e);
+    toast('⚠️ Error al eliminar en la nube, pero se ocultó localmente');
+  }
 }
 
 function updateVinField(vin, field, value) {
