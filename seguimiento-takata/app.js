@@ -224,6 +224,13 @@ function getCampVal(mes, dealer, camp, baseVal) {
 function initKpis() {
   loadCampEdits();
   const monthSel = qs('#month-select');
+
+  // Seleccionar mes actual automáticamente
+  const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const mesActual = meses[new Date().getMonth()];
+  const opcionMes = Array.from(monthSel.options).find(o => o.value === mesActual);
+  if (opcionMes) opcionMes.selected = true;
+
   monthSel.addEventListener('change', e => renderCampaignsTable(e.target.value));
   renderCampaignsTable(monthSel.value);
 }
