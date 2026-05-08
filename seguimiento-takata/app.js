@@ -422,7 +422,8 @@ function renderProceso() {
   });
   const accionesEl = qs('#acciones-kpis');
   if (accionesEl) {
-    accionesEl.innerHTML = ALL_ACTIONS
+    const totalAcciones = Object.values(actionCounts).reduce((s, n) => s + n, 0);
+    const chips = ALL_ACTIONS
       .filter(a => actionCounts[a] > 0)
       .map(a => {
         const col = actionColors[a] || '#888';
@@ -435,7 +436,21 @@ function renderProceso() {
           <span style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></span>
           ${a} <span style="font-size:.85rem;margin-left:2px">${actionCounts[a]}</span>
         </div>`;
-      }).join('');
+      });
+
+    // Chip de TOTAL al final
+    chips.push(`<div style="
+      display:flex; align-items:center; gap:6px;
+      background:rgba(255,255,255,0.08); border:1.5px solid rgba(255,255,255,0.35);
+      border-radius:999px; padding:4px 14px;
+      font-size:.72rem; font-weight:800; color:#fff;
+      margin-left:4px;
+    ">
+      <span style="width:8px;height:8px;border-radius:50%;background:#fff;flex-shrink:0"></span>
+      TOTAL <span style="font-size:.9rem;margin-left:4px">${totalAcciones}</span>
+    </div>`);
+
+    accionesEl.innerHTML = chips.join('');
   }
 
   const tbody = qs('#proceso-body');
