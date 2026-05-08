@@ -15,6 +15,10 @@ app.get('/debug-servidor', (req, res) => {
   res.json({ status: 'OK', puerto: PORT, folder: __dirname });
 });
 
+app.get('/ping', (req, res) => {
+  res.send('pong');
+});
+
 // Servir archivos estáticos de forma estándar
 app.use(express.static(path.join(__dirname, 'public')));
 
