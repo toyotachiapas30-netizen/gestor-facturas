@@ -441,12 +441,12 @@ function renderProceso() {
     // Chip de TOTAL al final
     chips.push(`<div style="
       display:flex; align-items:center; gap:6px;
-      background:rgba(255,255,255,0.08); border:1.5px solid rgba(255,255,255,0.35);
+      background:rgba(241,196,15,0.15); border:1.5px solid #F1C40F;
       border-radius:999px; padding:4px 14px;
-      font-size:.72rem; font-weight:800; color:#fff;
+      font-size:.72rem; font-weight:800; color:#F1C40F;
       margin-left:4px;
     ">
-      <span style="width:8px;height:8px;border-radius:50%;background:#fff;flex-shrink:0"></span>
+      <span style="width:8px;height:8px;border-radius:50%;background:#F1C40F;flex-shrink:0"></span>
       TOTAL <span style="font-size:.9rem;margin-left:4px">${totalAcciones}</span>
     </div>`);
 
