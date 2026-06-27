@@ -109,7 +109,15 @@ app.get('*', (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`\n✅ SERVIDOR ACTUALIZADO`);
   console.log(`🚀 Corriendo en puerto: ${PORT}`);
+  
+  // Restaurar tokens de Google desde la base de datos en el arranque del servidor
+  try {
+    const { restoreTokensFromDatabase } = require('./routes/drive');
+    await restoreTokensFromDatabase();
+  } catch (err) {
+    console.error('⚠️ Error al iniciar restauración de tokens:', err.message);
+  }
 });

@@ -78,6 +78,25 @@ router.get('/callback', async (req, res) => {
     const { tokens } = await client.getToken(code);
     fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens));
 
+    // Guardar copia de seguridad en Supabase
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+      try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+        await supabase.from('gastos').upsert({
+          id: 'google_tokens',
+          proveedor: 'SYSTEM_CONFIG',
+          concepto: JSON.stringify(tokens),
+          monto: 0,
+          mes: 'SYSTEM',
+          fecha_factura: new Date().toISOString().split('T')[0]
+        });
+        console.log('✅ Google tokens respaldados en Supabase.');
+      } catch (dbErr) {
+        console.error('⚠️ Error al respaldar tokens en Supabase:', dbErr.message);
+      }
+    }
+
     const refreshToken = tokens.refresh_token;
     
     let extraMsg = '';
@@ -107,10 +126,21 @@ router.get('/callback', async (req, res) => {
 });
 
 // ── POST /api/drive/logout  →  Clear tokens ───
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
   try {
     if (fs.existsSync(TOKENS_FILE)) {
       fs.unlinkSync(TOKENS_FILE);
+    }
+    // Eliminar también de Supabase
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+      try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+        await supabase.from('gastos').delete().eq('id', 'google_tokens');
+        console.log('🗑️ Tokens de Google eliminados de Supabase.');
+      } catch (dbErr) {
+        console.error('⚠️ Error al eliminar tokens en Supabase:', dbErr.message);
+      }
     }
     res.json({ ok: true, message: 'Tokens eliminados. Por favor actualiza la página.' });
   } catch (err) {
@@ -188,8 +218,34 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async 
   }
 });
 
+async function restoreTokensFromDatabase() {
+  if (fs.existsSync(TOKENS_FILE)) return;
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+    console.log('ℹ️ Supabase no configurado, omitiendo restauración de tokens de Google.');
+    return;
+  }
+  
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+    const { data, error } = await supabase.from('gastos').select('concepto').eq('id', 'google_tokens').maybeSingle();
+    if (error) throw error;
+    if (data && data.concepto) {
+      console.log('📦 Restaurando tokens de Google desde Supabase...');
+      fs.writeFileSync(TOKENS_FILE, data.concepto);
+      console.log('✅ Tokens de Google restaurados en el disco local.');
+    } else {
+      console.log('ℹ️ No se encontraron tokens de Google en Supabase.');
+    }
+  } catch (err) {
+    console.error('❌ Error al restaurar tokens de Google desde Supabase:', err.message);
+  }
+}
+
 module.exports = {
   router,
   getAuthorizedClient,
-  getGoogle
+  getGoogle,
+  restoreTokensFromDatabase
 };
+
