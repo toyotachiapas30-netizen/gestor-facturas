@@ -24,11 +24,15 @@ const SCOPES = [
 
 function getOAuthClient(req) {
   const { google } = require('googleapis');
-  return new google.auth.OAuth2(
+  const https = require('https');
+  const client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     getRedirectUri(req)
   );
+  // Desactivar keep-alive para evitar error "Premature close" en Node.js de Render
+  client.transporter.instance.defaults.agent = new https.Agent({ keepAlive: false });
+  return client;
 }
 
 function getAuthorizedClient() {
