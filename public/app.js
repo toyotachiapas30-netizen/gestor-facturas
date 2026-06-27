@@ -153,6 +153,7 @@ function goTo(n) {
     const sucName = document.getElementById('inp-sucursal').options[document.getElementById('inp-sucursal').selectedIndex].text;
     const indicator = document.getElementById('active-branch-name');
     if (indicator) indicator.textContent = sucName;
+    loadSheets(); // Cargar automáticamente todas las hojas de esta sucursal
   }
 
   window.scrollTo({top:0,behavior:'smooth'});
@@ -434,6 +435,7 @@ async function buscarSheetPorNombre() {
 
   if (!nombre) {
     statusEl.textContent = '';
+    loadSheets(); // Si se vacía el buscador, cargar de nuevo todos los proveedores
     return;
   }
 

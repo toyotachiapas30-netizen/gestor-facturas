@@ -1,3 +1,8 @@
+const http = require('http');
+const https = require('https');
+http.globalAgent.keepAlive = false;
+https.globalAgent.keepAlive = false;
+
 const fs = require('fs');
 require('dotenv').config();
 const express = require('express');
