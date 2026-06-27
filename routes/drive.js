@@ -84,7 +84,7 @@ router.get('/callback', async (req, res) => {
         const { createClient } = require('@supabase/supabase-js');
         const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
         await supabase.from('gastos').upsert({
-          id: 'google_tokens',
+          id: '00000000-0000-0000-0000-000000000000',
           proveedor: 'SYSTEM_CONFIG',
           concepto: JSON.stringify(tokens),
           monto: 0,
@@ -136,7 +136,7 @@ router.post('/logout', async (req, res) => {
       try {
         const { createClient } = require('@supabase/supabase-js');
         const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-        await supabase.from('gastos').delete().eq('id', 'google_tokens');
+        await supabase.from('gastos').delete().eq('id', '00000000-0000-0000-0000-000000000000');
         console.log('🗑️ Tokens de Google eliminados de Supabase.');
       } catch (dbErr) {
         console.error('⚠️ Error al eliminar tokens en Supabase:', dbErr.message);
@@ -228,7 +228,7 @@ async function restoreTokensFromDatabase() {
   try {
     const { createClient } = require('@supabase/supabase-js');
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-    const { data, error } = await supabase.from('gastos').select('concepto').eq('id', 'google_tokens').maybeSingle();
+    const { data, error } = await supabase.from('gastos').select('concepto').eq('id', '00000000-0000-0000-0000-000000000000').maybeSingle();
     if (error) throw error;
     if (data && data.concepto) {
       console.log('📦 Restaurando tokens de Google desde Supabase...');

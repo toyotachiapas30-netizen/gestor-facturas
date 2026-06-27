@@ -95,12 +95,12 @@ router.get('/proveedores', async (req, res) => {
   try {
     const db = getDB();
     if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').select('proveedor').neq('id', 'google_tokens').order('proveedor', { ascending: true });
+      const { data, error } = await db.client.from('gastos').select('proveedor').neq('id', '00000000-0000-0000-0000-000000000000').order('proveedor', { ascending: true });
       if (error) throw error;
       const providers = Array.from(new Set(data.map(r => r.proveedor).filter(Boolean)));
       return res.json({ ok: true, proveedores: providers });
     } else {
-      const rows = db.client.prepare("SELECT DISTINCT proveedor FROM gastos WHERE id != 'google_tokens' ORDER BY proveedor ASC").all();
+      const rows = db.client.prepare("SELECT DISTINCT proveedor FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000' ORDER BY proveedor ASC").all();
       return res.json({ ok: true, proveedores: rows.map(r => r.proveedor) });
     }
   } catch (err) {
@@ -134,7 +134,7 @@ router.get('/', async (req, res) => {
 
   try {
     if (db.type === 'supabase') {
-      let query = db.client.from('gastos').select('*').neq('id', 'google_tokens');
+      let query = db.client.from('gastos').select('*').neq('id', '00000000-0000-0000-0000-000000000000');
       if (mes) query = query.eq('mes', mes);
       if (estatus) query = query.eq('estatus', estatus);
       if (desde) query = query.gte('fecha_factura', desde);
@@ -154,7 +154,7 @@ router.get('/', async (req, res) => {
       const pagados = rows.filter(r => r.estatus === 'pagado').length;
       return res.json({ ok: true, gastos: rows, resumen: { total, enProceso, pagados, count: rows.length } });
     } else {
-      let sql = "SELECT * FROM gastos WHERE id != 'google_tokens'";
+      let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
       const params = [];
       if (mes) { sql += ' AND mes = ?'; params.push(mes); }
       if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
@@ -188,12 +188,12 @@ router.get('/meses', async (req, res) => {
   try {
     const db = getDB();
     if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').select('mes').neq('id', 'google_tokens').order('mes', { ascending: false });
+      const { data, error } = await db.client.from('gastos').select('mes').neq('id', '00000000-0000-0000-0000-000000000000').order('mes', { ascending: false });
       if (error) throw error;
       const meses = Array.from(new Set(data.map(r => r.mes).filter(Boolean)));
       return res.json({ ok: true, meses });
     } else {
-      const rows = db.client.prepare("SELECT DISTINCT mes FROM gastos WHERE id != 'google_tokens' ORDER BY mes DESC").all();
+      const rows = db.client.prepare("SELECT DISTINCT mes FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000' ORDER BY mes DESC").all();
       return res.json({ ok: true, meses: rows.map(r => r.mes) });
     }
   } catch (err) {
@@ -322,7 +322,7 @@ router.get('/stats', async (req, res) => {
     
     if (db.type === 'supabase') {
       const now = new Date();
-      let query = db.client.from('gastos').select('monto, categoria, mes, fecha_factura').neq('id', 'google_tokens');
+      let query = db.client.from('gastos').select('monto, categoria, mes, fecha_factura').neq('id', '00000000-0000-0000-0000-000000000000');
       
       if (desde) query = query.gte('fecha_factura', desde);
       if (hasta) query = query.lte('fecha_factura', hasta);
@@ -364,7 +364,7 @@ router.get('/stats', async (req, res) => {
       return res.json({ ok: true, stats: { monthly, byCategory, yearly: [] } });
     } else {
       const sqlite = db.client;
-      let dateFilter = "WHERE id != 'google_tokens'";
+      let dateFilter = "WHERE id != '00000000-0000-0000-0000-000000000000'";
       let timeGroup = 'mes';
       let limit = 12;
 
