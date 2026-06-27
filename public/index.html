@@ -255,16 +255,7 @@
           <button class="btn btn-primary" id="btn-sheets-preview" onclick="previewSheet()" style="background:#1e293b">👁️ Previsualizar</button>
         </div>
         
-        <div id="sheet-preview" style="display:none; margin-top:24px;">
-          <div style="background:rgba(30,41,59,0.03); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:20px;">
-            <div style="font-size:12px; font-weight:700; color:var(--text-sub); text-transform:uppercase; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:6px;">Resumen de llenado</div>
-            <div class="cfdi-grid" style="grid-template-columns:repeat(2,1fr); gap:12px;">
-              <div class="cfield"><div class="clabel">D40 — No. Factura</div><div class="cval" id="prev-nofact">—</div></div>
-              <div class="cfield"><div class="clabel">I40 — Fecha</div><div class="cval" id="prev-fecha">—</div></div>
-              <div class="cfield"><div class="clabel">J40 — Importe</div><div class="cval total" id="prev-importe">—</div></div>
-              <div class="cfield"><div class="clabel">L40 — Concepto</div><div class="cval" id="prev-concepto">—</div></div>
-            </div>
-          </div>
+        <div class="field" style="margin-top:20px;">
           <label>Nombre del Proveedor (para buscar en Drive)</label>
           <input type="text" id="inp-proveedor-sheet" placeholder="Ej: SEFESO" oninput="debounceBuscarSheet()"/>
           <div id="sheet-search-status" style="font-size:12px;color:var(--text-muted);margin-top:4px;"></div>
@@ -275,6 +266,18 @@
           <select id="sel-sheet" onchange="onSheetChange()">
             <option value="">— Busca por nombre de proveedor arriba —</option>
           </select>
+        </div>
+
+        <div id="sheet-preview" style="display:none; margin-top:24px;">
+          <div style="background:rgba(30,41,59,0.03); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:20px;">
+            <div style="font-size:12px; font-weight:700; color:var(--text-sub); text-transform:uppercase; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:6px;">Resumen de llenado</div>
+            <div class="cfdi-grid" style="grid-template-columns:repeat(2,1fr); gap:12px;">
+              <div class="cfield"><div class="clabel">D40 — No. Factura</div><div class="cval" id="prev-nofact">—</div></div>
+              <div class="cfield"><div class="clabel">I40 — Fecha</div><div class="cval" id="prev-fecha">—</div></div>
+              <div class="cfield"><div class="clabel">J40 — Importe</div><div class="cval total" id="prev-importe">—</div></div>
+              <div class="cfield"><div class="clabel">L40 — Concepto</div><div class="cval" id="prev-concepto">—</div></div>
+            </div>
+          </div>
         </div>
         <div class="field">
           <label>Nombre de la pestaña (tab) en el Sheet</label>
