@@ -58,6 +58,10 @@ function getDB() {
     _db.exec(`ALTER TABLE gastos ADD COLUMN comprobante_pago_url TEXT`);
     console.log('✅ [DB] Migración: Columna comprobante_pago_url añadida.');
   } catch (err) {}
+  try {
+    _db.exec(`ALTER TABLE gastos ADD COLUMN sucursal TEXT`);
+    console.log('✅ [DB] Migración: Columna sucursal añadida.');
+  } catch (err) {}
   
   return { type: 'sqlite', client: _db };
 }
@@ -129,10 +133,11 @@ router.get('/check/:uuid', async (req, res) => {
 
 // ── GET /api/gastos  →  List expenses ──
 router.get('/', async (req, res) => {
-  const { mes, categoria, estatus, desde, hasta, proveedor } = req.query;
+  const { mes, categoria, estatus, desde, hasta, proveedor, sucursal } = req.query;
   const db = getDB();
 
   try {
+    let rows = [];
     if (db.type === 'supabase') {
       let query = db.client.from('gastos').select('*').neq('id', '00000000-0000-0000-0000-000000000000');
       if (mes) query = query.eq('mes', mes);
@@ -146,13 +151,47 @@ router.get('/', async (req, res) => {
         if (catArray.length > 0) query = query.in('categoria', catArray);
       }
       
-      const { data: rows, error } = await query.order('created_at', { ascending: false });
+      const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
+      rows = data;
+    } else {
+      let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
+      const params = [];
+      if (mes) { sql += ' AND mes = ?'; params.push(mes); }
+      if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
+      if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
+      if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
+      if (proveedor) { sql += ' AND proveedor LIKE ?'; params.push(`%${proveedor}%`); }
+      
+      if (categoria) {
+        const catArray = categoria.split('|').filter(Boolean);
+        if (catArray.length > 0) {
+          sql += ` AND categoria IN (${catArray.map(() => '?').join(',')})`;
+          params.push(...catArray);
+        }
+      }
+      
+      sql += ' ORDER BY created_at DESC';
+      rows = db.client.prepare(sql).all(...params);
+    }
 
-      const total = rows.reduce((sum, r) => sum + (r.monto || 0), 0);
-      const enProceso = rows.filter(r => r.estatus === 'en_proceso').length;
-      const pagados = rows.filter(r => r.estatus === 'pagado').length;
-      return res.json({ ok: true, gastos: rows, resumen: { total, enProceso, pagados, count: rows.length } });
+    // Filtrado en memoria por sucursal con inferencia automática para registros históricos
+    let finalRows = rows;
+    if (sucursal) {
+      finalRows = rows.filter(r => {
+        const rSuc = r.sucursal || (r.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
+        return rSuc === sucursal;
+      });
+    }
+
+    const total = finalRows.reduce((sum, r) => sum + (r.monto || 0), 0);
+    const enProceso = finalRows.filter(r => r.estatus === 'en_proceso').length;
+    const pagados = finalRows.filter(r => r.estatus === 'pagado').length;
+    return res.json({ ok: true, gastos: finalRows, resumen: { total, enProceso, pagados, count: finalRows.length } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
     } else {
       let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
       const params = [];
@@ -203,7 +242,7 @@ router.get('/meses', async (req, res) => {
 
 // ── POST /api/gastos  →  Create expense ────────────────────
 router.post('/', async (req, res) => {
-  const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria } = req.body;
+  const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sucursal } = req.body;
   if (!proveedor || !folio) return res.status(400).json({ ok: false, error: 'Proveedor y folio son requeridos.' });
 
   const mes = fechaFactura ? fechaFactura.substring(0, 7) : new Date().toISOString().substring(0, 7);
@@ -212,16 +251,16 @@ router.post('/', async (req, res) => {
   try {
     if (db.type === 'supabase') {
       const { data, error } = await db.client.from('gastos').insert([{
-        uuid, proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria, mes, sheet_url: req.body.sheet_url
+        uuid, proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria, mes, sheet_url: req.body.sheet_url, sucursal
       }]).select().single();
       if (error) throw error;
       return res.json({ ok: true, gasto: data });
     } else {
       const id = uuidv4();
       db.client.prepare(`
-        INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0, concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS', mes, req.body.sheet_url || '');
+        INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url, sucursal)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0, concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS', mes, req.body.sheet_url || '', sucursal || '');
       const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
       return res.json({ ok: true, gasto: row });
     }
@@ -233,14 +272,14 @@ router.post('/', async (req, res) => {
 // ── PUT /api/gastos/:id  →  Update expense ──────────────────
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria } = req.body;
+  const { proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sucursal } = req.body;
   const db = getDB();
 
   try {
     const mes = fechaFactura ? fechaFactura.substring(0, 7) : undefined;
 
     if (db.type === 'supabase') {
-      const updates = { proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria };
+      const updates = { proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria, sucursal };
       if (mes) updates.mes = mes;
       
       const { data, error } = await db.client.from('gastos').update(updates).eq('id', id).select().single();
@@ -253,7 +292,7 @@ router.put('/:id', async (req, res) => {
       db.client.prepare(`
         UPDATE gastos SET
           proveedor = ?, folio = ?, fecha_factura = ?, monto = ?,
-          concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?, sheet_url = ?
+          concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?, sheet_url = ?, sucursal = ?
         WHERE id = ?
       `).run(
         proveedor || existing.proveedor, folio || existing.folio, fechaFactura || existing.fecha_factura,
@@ -261,6 +300,7 @@ router.put('/:id', async (req, res) => {
         fechaSolicitud || existing.fecha_solicitud, estatus || existing.estatus,
         categoria || existing.categoria, mes || existing.mes, 
         req.body.sheet_url !== undefined ? req.body.sheet_url : existing.sheet_url,
+        sucursal !== undefined ? sucursal : existing.sucursal,
         id
       );
       const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
@@ -311,18 +351,16 @@ router.delete('/:id', async (req, res) => {
 
 // ── GET /api/gastos/stats  →  Data for Charts ──────────────
 router.get('/stats', async (req, res) => {
+  const { desde, hasta, categoria, mes: mesFiltro, rango, sucursal } = req.query;
+  const db = getDB();
+
   try {
-    const db = getDB();
-    const rango = req.query.rango || 'todo';
-    const mesFiltro = req.query.mes || '';
-    const desde = req.query.desde || '';
-    const hasta = req.query.hasta || '';
-    const categoria = req.query.categoria || '';
     const proveedor = req.query.proveedor || '';
+    let rows = [];
     
     if (db.type === 'supabase') {
       const now = new Date();
-      let query = db.client.from('gastos').select('monto, categoria, mes, fecha_factura').neq('id', '00000000-0000-0000-0000-000000000000');
+      let query = db.client.from('gastos').select('monto, categoria, mes, fecha_factura, sucursal').neq('id', '00000000-0000-0000-0000-000000000000');
       
       if (desde) query = query.gte('fecha_factura', desde);
       if (hasta) query = query.lte('fecha_factura', hasta);
@@ -346,29 +384,12 @@ router.get('/stats', async (req, res) => {
         }
       }
 
-      const { data: rows, error } = await query;
+      const { data, error } = await query;
       if (error) throw error;
-
-      const monthlyObj = {};
-      const byCategoryObj = {};
-      
-      rows.forEach(r => {
-        const label = (mesFiltro || desde || hasta || rango === 'mes') ? r.fecha_factura : r.mes;
-        monthlyObj[label] = (monthlyObj[label] || 0) + (r.monto || 0);
-        byCategoryObj[r.categoria] = (byCategoryObj[r.categoria] || 0) + (r.monto || 0);
-      });
-
-      const monthly = Object.entries(monthlyObj).map(([label, total]) => ({ label, total })).sort((a,b) => a.label.localeCompare(b.label));
-      const byCategory = Object.entries(byCategoryObj).map(([categoria, total]) => ({ categoria, total })).sort((a,b) => b.total - a.total);
-
-      return res.json({ ok: true, stats: { monthly, byCategory, yearly: [] } });
+      rows = data;
     } else {
       const sqlite = db.client;
       let dateFilter = "WHERE id != '00000000-0000-0000-0000-000000000000'";
-      let timeGroup = 'mes';
-      let limit = 12;
-
-      const now = new Date();
 
       if (desde) dateFilter += ` AND fecha_factura >= '${desde}'`;
       if (hasta) dateFilter += ` AND fecha_factura <= '${hasta}'`;
@@ -381,37 +402,48 @@ router.get('/stats', async (req, res) => {
         }
       }
 
+      const now = new Date();
       if (mesFiltro) {
         dateFilter += ` AND mes = '${mesFiltro}'`;
-        timeGroup = 'fecha_factura';
-        limit = 31;
-      } else if (desde || hasta) {
-        timeGroup = 'fecha_factura';
-        limit = 100;
       } else if (rango === 'mes') {
         dateFilter += ` AND mes = '${now.toISOString().substring(0, 7)}'`;
-        timeGroup = 'fecha_factura';
-        limit = 31;
       } else if (rango === 'trimestre') {
         now.setMonth(now.getMonth() - 2);
         dateFilter += ` AND mes >= '${now.toISOString().substring(0, 7)}'`;
-        limit = 3;
       } else if (rango === 'anual') {
         dateFilter += ` AND SUBSTR(mes, 1, 4) = '${now.getFullYear()}'`;
       }
 
-      const timeQuery = `SELECT ${timeGroup} as label, SUM(monto) as total FROM gastos ${dateFilter} GROUP BY label ORDER BY label DESC LIMIT ${limit}`;
-      const monthly = sqlite.prepare(timeQuery).all().reverse();
-
-      const byCategory = sqlite.prepare(`SELECT categoria, SUM(monto) as total FROM gastos ${dateFilter} GROUP BY categoria ORDER BY total DESC`).all();
-
-      return res.json({ ok: true, stats: { monthly, byCategory, yearly: [] } });
+      rows = sqlite.prepare(`SELECT monto, categoria, mes, fecha_factura, sucursal FROM gastos ${dateFilter}`).all();
     }
+
+    // Filtrado en memoria por sucursal con inferencia automática para registros históricos
+    let finalRows = rows;
+    if (sucursal) {
+      finalRows = rows.filter(r => {
+        const rSuc = r.sucursal || (r.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
+        return rSuc === sucursal;
+      });
+    }
+
+    // Agregar datos en memoria
+    const monthlyObj = {};
+    const byCategoryObj = {};
+    
+    finalRows.forEach(r => {
+      const label = (mesFiltro || desde || hasta || rango === 'mes') ? r.fecha_factura : r.mes;
+      monthlyObj[label] = (monthlyObj[label] || 0) + (r.monto || 0);
+      byCategoryObj[r.categoria] = (byCategoryObj[r.categoria] || 0) + (r.monto || 0);
+    });
+
+    const monthly = Object.entries(monthlyObj).map(([label, total]) => ({ label, total })).sort((a,b) => a.label.localeCompare(b.label));
+    const byCategory = Object.entries(byCategoryObj).map(([categoria, total]) => ({ categoria, total })).sort((a,b) => b.total - a.total);
+
+    return res.json({ ok: true, stats: { monthly, byCategory, yearly: [] } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
-
 // ── POST /api/gastos/:id/upload-pago ────────────────
 router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
   const { id } = req.params;

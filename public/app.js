@@ -442,14 +442,10 @@ async function buscarSheetPorNombre() {
   statusEl.textContent = '🔍 Buscando...';
   statusEl.style.color = 'var(--text-muted)';
 
-  let queryUrl = `/api/sheets/find?nombre=${encodeURIComponent(nombre)}`;
-  if (state.sucursalFolderId) {
-    queryUrl += `&folderId=${state.sucursalFolderId}`;
-  } else {
-    // Fallback: try to get it directly from the select just in case
-    const currentSuc = document.getElementById('inp-sucursal').value;
-    if (currentSuc) queryUrl += `&folderId=${currentSuc}`;
-  }
+  const sucursalSel = document.getElementById('inp-sucursal');
+  const sucursalName = sucursalSel.options[sucursalSel.selectedIndex].text;
+  const prefix = sucursalName.includes('Poniente') ? 'PTE' : 'MATRIZ';
+  let queryUrl = `/api/sheets/find?nombre=${encodeURIComponent(nombre)}&prefix=${prefix}`;
 
   try {
     const r = await fetch(queryUrl);
@@ -492,11 +488,12 @@ async function buscarSheetPorNombre() {
 
 async function loadSheets() {
   try {
-    let queryUrl = '/api/sheets/find';
-    const currentSuc = state.sucursalFolderId || document.getElementById('inp-sucursal').value;
-    if (currentSuc) queryUrl += `?folderId=${currentSuc}`;
-
-    console.log(`📡 Solicitando hojas para sucursal: ${currentSuc}`);
+    const sucursalSel = document.getElementById('inp-sucursal');
+    const sucursalName = sucursalSel.options[sucursalSel.selectedIndex].text;
+    const prefix = sucursalName.includes('Poniente') ? 'PTE' : 'MATRIZ';
+    
+    let queryUrl = `/api/sheets/find?prefix=${prefix}`;
+    console.log(`📡 Solicitando hojas para prefijo sucursal: ${prefix}`);
     const r = await fetch(queryUrl);
     const data = await r.json();
     if (!data.ok || !data.sheets) return;
@@ -574,6 +571,9 @@ async function autoRegistrarGasto(concepto, categoria, sheetUrl) {
   const fechaFactura = c.fecha ? c.fecha.substring(0, 10) : '';
   const hoy = new Date().toISOString().substring(0, 10);
 
+  const sucursalSel = document.getElementById('inp-sucursal');
+  const sucursalName = sucursalSel.options[sucursalSel.selectedIndex].text;
+
   try {
     await fetch('/api/gastos', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -587,7 +587,8 @@ async function autoRegistrarGasto(concepto, categoria, sheetUrl) {
         fechaSolicitud: hoy,
         estatus: 'en_proceso',
         categoria: categoria || 'OTROS',
-        sheet_url: sheetUrl || ''
+        sheet_url: sheetUrl || '',
+        sucursal: sucursalName
       })
     });
   } catch (err) {
@@ -734,6 +735,7 @@ async function loadGastos() {
   cbs.forEach(cb => selectedCats.push(cb.value));
   const cat = selectedCats.join('|');
 
+  const suc = document.getElementById('filter-sucursal')?.value || '';
   let url = '/api/gastos?';
   if (mes) url += `mes=${encodeURIComponent(mes)}&`;
   if (cat) url += `categoria=${encodeURIComponent(cat)}&`;
@@ -741,6 +743,7 @@ async function loadGastos() {
   if (est) url += `estatus=${encodeURIComponent(est)}&`;
   if (desde) url += `desde=${encodeURIComponent(desde)}&`;
   if (hasta) url += `hasta=${encodeURIComponent(hasta)}&`;
+  if (suc) url += `sucursal=${encodeURIComponent(suc)}&`;
 
   try {
     const r = await fetch(url);
@@ -801,6 +804,11 @@ async function loadGastos() {
           <span class="estatus-tag ${g.estatus}" onclick="toggleEstatus('${g.id}','${g.estatus}')" style="cursor:pointer" title="Hacer clic para cambiar estado">
             <span class="estatus-dot"></span>
             ${g.estatus === 'en_proceso' ? 'En proceso' : 'Pagado'}
+          </span>
+        </td>
+        <td>
+          <span class="suc-tag" style="background:#1e293b; color:#cbd5e1; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600; text-transform:uppercase;">
+            ${escHtml(g.sucursal || (g.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas'))}
           </span>
         </td>
         <td><span class="cat-tag">${escHtml(g.categoria || '')}</span></td>
@@ -1010,6 +1018,9 @@ async function editGasto(id) {
     document.getElementById('gf-estatus').value = gasto.estatus || 'en_proceso';
     document.getElementById('gf-categoria').value = gasto.categoria || '';
     document.getElementById('gf-sheet-url').value = gasto.sheet_url || '';
+    
+    const defSuc = gasto.sucursal || (gasto.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
+    document.getElementById('gf-sucursal').value = defSuc;
 
     document.getElementById('gastos-form-overlay').classList.add('open');
   } catch (err) {
@@ -1029,6 +1040,7 @@ function openGastoForm() {
   document.getElementById('gf-estatus').value = 'en_proceso';
   document.getElementById('gf-categoria').value = '';
   document.getElementById('gf-sheet-url').value = '';
+  document.getElementById('gf-sucursal').value = 'Toyota Chiapas';
   hideErr('err-gasto-form');
   document.getElementById('gastos-form-overlay').classList.add('open');
 }
@@ -1055,7 +1067,8 @@ async function saveGasto() {
     fechaSolicitud: document.getElementById('gf-fecha-solicitud').value,
     estatus: document.getElementById('gf-estatus').value,
     categoria: document.getElementById('gf-categoria').value,
-    sheet_url: document.getElementById('gf-sheet-url').value.trim()
+    sheet_url: document.getElementById('gf-sheet-url').value.trim(),
+    sucursal: document.getElementById('gf-sucursal').value
   };
 
   setLoading('btn-save-gasto','spin-gasto',true);
@@ -1090,8 +1103,9 @@ async function loadStats() {
   cbs.forEach(cb => selectedCats.push(cb.value));
   const cat = selectedCats.join('|');
 
+  const suc = document.getElementById('filter-sucursal')?.value || '';
   try {
-    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}&categoria=${cat}&proveedor=${encodeURIComponent(prov.trim())}`);
+    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}&categoria=${cat}&proveedor=${encodeURIComponent(prov.trim())}&sucursal=${encodeURIComponent(suc)}`);
     const data = await r.json();
     if (data.ok) renderCharts(data.stats, rango);
   } catch(e) { 

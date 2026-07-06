@@ -34,18 +34,20 @@ router.get('/find', async (req, res) => {
 
   const drive = getGoogle().drive({ version: 'v3', auth: client });
   
-  // Strictly prioritize the folderId passed from the frontend
-  const folderId = (req.query.folderId && req.query.folderId.trim()) 
-    ? req.query.folderId 
-    : process.env.GOOGLE_SHEETS_FOLDER_ID;
-
+  // Always query from the configured GOOGLE_SHEETS_FOLDER_ID
+  const folderId = process.env.GOOGLE_SHEETS_FOLDER_ID || '1t-dylPS1zV54AJE2eGozKJDR4RqUtNO7';
+  const prefix = req.query.prefix || '';
   const nombre = req.query.nombre || '';
   
-  console.log(`🔍 Buscando contrarecibo en carpeta: ${folderId} (Nombre: "${nombre}")`);
+  console.log(`🔍 Buscando contrarecibo en carpeta: ${folderId} (Prefix: "${prefix}", Nombre: "${nombre}")`);
 
   try {
     // Search strictly for Google Sheets inside the specified folder
     let q = `'${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+
+    if (prefix.trim()) {
+      q += ` and name contains '${prefix.trim()}'`;
+    }
 
     if (nombre.trim()) {
       const cleanNombre = nombre.trim().replace(/'/g, "\\'");

@@ -394,6 +394,14 @@
           </select>
         </div>
         <div class="field">
+          <label>Sucursal</label>
+          <select id="filter-sucursal" onchange="loadGastos(); loadStats()">
+            <option value="">Todas</option>
+            <option value="Toyota Chiapas">Toyota Chiapas</option>
+            <option value="Toyota Farrera Poniente">Toyota Farrera Poniente</option>
+          </select>
+        </div>
+        <div class="field">
           <label>Desde</label>
           <input type="date" id="filter-desde" onchange="loadGastos(); loadStats()" style="padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-main); font-family: inherit;">
         </div>
@@ -422,6 +430,7 @@
                 <th>Fecha Sol.</th>
                 <th>CONTRARECIBO</th>
                 <th>ESTATUS</th>
+                <th>SUCURSAL</th>
                 <th>CATEGORIA</th>
                 <th></th>
               </tr>
@@ -508,6 +517,13 @@
         <select id="gf-estatus">
           <option value="en_proceso">🟡 En Proceso</option>
           <option value="pagado">🟢 Pagado</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Sucursal</label>
+        <select id="gf-sucursal">
+          <option value="Toyota Chiapas">Toyota Chiapas</option>
+          <option value="Toyota Farrera Poniente">Toyota Farrera Poniente</option>
         </select>
       </div>
       <div class="field full">
