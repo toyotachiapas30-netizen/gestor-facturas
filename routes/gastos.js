@@ -192,35 +192,6 @@ router.get('/', async (req, res) => {
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
-    } else {
-      let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
-      const params = [];
-      if (mes) { sql += ' AND mes = ?'; params.push(mes); }
-      if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
-      if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
-      if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
-      if (proveedor) { sql += ' AND proveedor LIKE ?'; params.push(`%${proveedor}%`); }
-      
-      if (categoria) {
-        const catArray = categoria.split('|').filter(Boolean);
-        if (catArray.length > 0) {
-          sql += ` AND categoria IN (${catArray.map(() => '?').join(',')})`;
-          params.push(...catArray);
-        }
-      }
-      
-      sql += ' ORDER BY created_at DESC';
-
-      const rows = db.client.prepare(sql).all(...params);
-      const total = rows.reduce((sum, r) => sum + (r.monto || 0), 0);
-      const enProceso = rows.filter(r => r.estatus === 'en_proceso').length;
-      const pagados = rows.filter(r => r.estatus === 'pagado').length;
-      return res.json({ ok: true, gastos: rows, resumen: { total, enProceso, pagados, count: rows.length } });
-    }
-  } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // ── GET /api/gastos/meses ────────────────────────────
 router.get('/meses', async (req, res) => {
