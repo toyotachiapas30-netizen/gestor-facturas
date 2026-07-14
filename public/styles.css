@@ -290,8 +290,22 @@ header p { color:var(--text-sub); font-size:15px; }
 .summary-card .sc-value.proceso-val { color: var(--warning); }
 .summary-card .sc-value.pagado-val  { color: var(--success); }
 
+/* Ensure the card container and parent elements restrict their width to the viewport */
+.main-view, .card {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* ── Gastos Table ─────────────────── */
-.gastos-table-wrap { overflow-x:auto; border-radius:var(--r); border:1px solid var(--border); }
+.gastos-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+}
 .gastos-table {
   width:100%; border-collapse:collapse; font-size:13px;
 }
@@ -304,6 +318,19 @@ header p { color:var(--text-sub); font-size:15px; }
 .gastos-table td {
   padding:12px; border-bottom:1px solid var(--border);
   color:var(--text); vertical-align:middle;
+}
+.gastos-table td.prov-cell {
+  max-width: 140px;
+  white-space: normal;
+  word-break: break-word;
+  font-weight: 600;
+}
+.gastos-table td.concepto-cell {
+  min-width: 180px;
+  max-width: 250px;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.45;
 }
 .gastos-table tbody tr { transition:background .2s; }
 .gastos-table tbody tr:hover { background:var(--surface-hover); }

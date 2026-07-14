@@ -778,48 +778,53 @@ async function loadGastos() {
     document.getElementById('gs-proceso').textContent = data.resumen.enProceso;
     document.getElementById('gs-pagados').textContent = data.resumen.pagados;
 
-    tbody.innerHTML = data.gastos.map(g => `
-      <tr>
-        <td style="font-weight:600;white-space:nowrap;">${escHtml(g.proveedor)}</td>
-        <td>${escHtml(g.folio)}</td>
-        <td style="white-space:nowrap;">${fmtShortDate(g.fecha_factura)}</td>
-        <td class="monto-cell" style="font-weight:600;color:var(--primary);">${fmtMonto(String(g.monto), 'MXN')}</td>
-        <td class="pago-cell" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handlePagoDrop(event, '${g.id}')">
-          <div class="pago-cell-content">
-            ${g.comprobante_pago_url ? 
-              `<div class="pago-link-wrap">
-                <a href="/api/gastos/${g.id}/download-comprobante" target="_blank" title="Descargar Comprobante" style="font-size:18px;text-decoration:none;">📄</a>
-                <button class="pago-delete-btn" onclick="borrarComprobante('${g.id}')" title="Eliminar Comprobante">×</button>
-              </div>` : 
-              `<span class="pago-placeholder" style="opacity:0.3;cursor:default;" title="Arrastra el PDF aquí">＋</span>`
-            }
-          </div>
-        </td>
-        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(g.concepto)}">${escHtml(g.concepto)}</td>
-        <td style="white-space:nowrap;">${fmtShortDate(g.fecha_solicitud)}</td>
-        <td style="text-align:center;">
-          ${g.sheet_url ? `<a href="${g.sheet_url}" target="_blank" title="Ver Contrarecibo" style="font-size:16px;text-decoration:none;">📊</a>` : '—'}
-        </td>
-        <td>
-          <span class="estatus-tag ${g.estatus}" onclick="toggleEstatus('${g.id}','${g.estatus}')" style="cursor:pointer" title="Hacer clic para cambiar estado">
-            <span class="estatus-dot"></span>
-            ${g.estatus === 'en_proceso' ? 'En proceso' : 'Pagado'}
-          </span>
-        </td>
-        <td>
-          <span class="suc-tag" style="background:#1e293b; color:#cbd5e1; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600; text-transform:uppercase;">
-            ${escHtml(g.sucursal || (g.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas'))}
-          </span>
-        </td>
-        <td><span class="cat-tag">${escHtml(g.categoria || '')}</span></td>
-        <td>
-          <div class="tbl-action">
-            <button class="tbl-btn edit" onclick="editGasto('${g.id}')" title="Editar">✏️</button>
-            <button class="tbl-btn" onclick="deleteGasto('${g.id}')" title="Eliminar" style="color:#fca5a5">🗑️</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = data.gastos.map(g => {
+      const rawSuc = g.sucursal || (g.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
+      const cleanSuc = rawSuc.includes('Poniente') ? 'Poniente' : 'Chiapas';
+      
+      return `
+        <tr>
+          <td class="prov-cell">${escHtml(g.proveedor)}</td>
+          <td>${escHtml(g.folio)}</td>
+          <td style="white-space:nowrap;">${fmtShortDate(g.fecha_factura)}</td>
+          <td class="monto-cell" style="font-weight:600;color:var(--primary);">${fmtMonto(String(g.monto), 'MXN')}</td>
+          <td class="pago-cell" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handlePagoDrop(event, '${g.id}')">
+            <div class="pago-cell-content">
+              ${g.comprobante_pago_url ? 
+                `<div class="pago-link-wrap">
+                  <a href="/api/gastos/${g.id}/download-comprobante" target="_blank" title="Descargar Comprobante" style="font-size:18px;text-decoration:none;">📄</a>
+                  <button class="pago-delete-btn" onclick="borrarComprobante('${g.id}')" title="Eliminar Comprobante">×</button>
+                </div>` : 
+                `<span class="pago-placeholder" style="opacity:0.3;cursor:default;" title="Arrastra el PDF aquí">＋</span>`
+              }
+            </div>
+          </td>
+          <td class="concepto-cell">${escHtml(g.concepto)}</td>
+          <td style="white-space:nowrap;">${fmtShortDate(g.fecha_solicitud)}</td>
+          <td style="text-align:center;">
+            ${g.sheet_url ? `<a href="${g.sheet_url}" target="_blank" title="Ver Contrarecibo" style="font-size:16px;text-decoration:none;">📊</a>` : '—'}
+          </td>
+          <td>
+            <span class="estatus-tag ${g.estatus}" onclick="toggleEstatus('${g.id}','${g.estatus}')" style="cursor:pointer" title="Hacer clic para cambiar estado">
+              <span class="estatus-dot"></span>
+              ${g.estatus === 'en_proceso' ? 'En proceso' : 'Pagado'}
+            </span>
+          </td>
+          <td>
+            <span class="suc-tag" style="background:#1e293b; color:#cbd5e1; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600; text-transform:uppercase;">
+              ${escHtml(cleanSuc)}
+            </span>
+          </td>
+          <td><span class="cat-tag">${escHtml(g.categoria || '')}</span></td>
+          <td>
+            <div class="tbl-action">
+              <button class="tbl-btn edit" onclick="editGasto('${g.id}')" title="Editar">✏️</button>
+              <button class="tbl-btn" onclick="deleteGasto('${g.id}')" title="Eliminar" style="color:#fca5a5">🗑️</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
 
     loadStats(); // Update charts too
 
