@@ -109,10 +109,7 @@ app.get('*', (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`\n✅ SERVIDOR ACTUALIZADO`);
-  console.log(`🚀 Corriendo en puerto: ${PORT}`);
-  
+async function startServer() {
   // 1. Restaurar base de datos SQLite desde Google Drive
   try {
     const { restoreDatabaseFromDrive } = require('./routes/gastos');
@@ -121,11 +118,18 @@ app.listen(PORT, '0.0.0.0', async () => {
     console.error('⚠️ Error al restaurar base de datos desde Google Drive:', err.message);
   }
 
-  // 2. Restaurar tokens de Google desde la base de datos en el arranque del servidor
-  try {
-    const { restoreTokensFromDatabase } = require('./routes/drive');
-    await restoreTokensFromDatabase();
-  } catch (err) {
-    console.error('⚠️ Error al iniciar restauración de tokens:', err.message);
-  }
-});
+  app.listen(PORT, '0.0.0.0', async () => {
+    console.log(`\n✅ SERVIDOR ACTUALIZADO`);
+    console.log(`🚀 Corriendo en puerto: ${PORT}`);
+
+    // 2. Restaurar tokens de Google desde la base de datos en el arranque del servidor
+    try {
+      const { restoreTokensFromDatabase } = require('./routes/drive');
+      await restoreTokensFromDatabase();
+    } catch (err) {
+      console.error('⚠️ Error al iniciar restauración de tokens:', err.message);
+    }
+  });
+}
+
+startServer();
