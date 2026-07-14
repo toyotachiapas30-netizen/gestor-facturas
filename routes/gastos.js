@@ -7,23 +7,10 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 const { getAuthorizedClient, getGoogle } = require('./drive');
 
-const { createClient } = require('@supabase/supabase-js');
-
 let _db = null;
-let _supabase = null;
 
 function getDB() {
-  // 1. Prefer Supabase if credentials exist (Cloud Mode)
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
-    if (!_supabase) {
-      _supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-      console.log('🌐 [DB] Usando Supabase (Cloud)');
-    }
-    return { type: 'supabase', client: _supabase };
-  }
-
-  // 2. Fallback to SQLite (Local Mode)
-  if (_db) return { type: 'sqlite', client: _db };
+  if (_db) return _db;
   
   const Database = require('better-sqlite3');
   const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -32,7 +19,6 @@ function getDB() {
   _db = new Database(path.join(DATA_DIR, 'gastos.db'));
   _db.pragma('journal_mode = WAL');
 
-  // Create table if not exists
   _db.exec(`
     CREATE TABLE IF NOT EXISTS gastos (
       id TEXT PRIMARY KEY,
@@ -48,24 +34,18 @@ function getDB() {
       mes TEXT,
       sheet_url TEXT,
       comprobante_pago_url TEXT,
+      sucursal TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )
   `);
 
-  // Migration for existing databases
+  // Migraciones
   try { _db.exec(`ALTER TABLE gastos ADD COLUMN sheet_url TEXT`); } catch (err) {}
-  try {
-    _db.exec(`ALTER TABLE gastos ADD COLUMN comprobante_pago_url TEXT`);
-    console.log('✅ [DB] Migración: Columna comprobante_pago_url añadida.');
-  } catch (err) {}
-  try {
-    _db.exec(`ALTER TABLE gastos ADD COLUMN sucursal TEXT`);
-    console.log('✅ [DB] Migración: Columna sucursal añadida.');
-  } catch (err) {}
-  
-  return { type: 'sqlite', client: _db };
-}
+  try { _db.exec(`ALTER TABLE gastos ADD COLUMN comprobante_pago_url TEXT`); } catch (err) {}
+  try { _db.exec(`ALTER TABLE gastos ADD COLUMN sucursal TEXT`); } catch (err) {}
 
+  return _db;
+}
 
 // ── Categories ────────────────────────────────────────────
 const CATEGORIAS = [
@@ -95,85 +75,51 @@ router.get('/categorias', (req, res) => {
 });
 
 // ── GET /api/gastos/proveedores ───────────────────────────
-router.get('/proveedores', async (req, res) => {
+router.get('/proveedores', (req, res) => {
   try {
     const db = getDB();
-    if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').select('proveedor').neq('id', '00000000-0000-0000-0000-000000000000').order('proveedor', { ascending: true });
-      if (error) throw error;
-      const providers = Array.from(new Set(data.map(r => r.proveedor).filter(Boolean)));
-      return res.json({ ok: true, proveedores: providers });
-    } else {
-      const rows = db.client.prepare("SELECT DISTINCT proveedor FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000' ORDER BY proveedor ASC").all();
-      return res.json({ ok: true, proveedores: rows.map(r => r.proveedor) });
-    }
+    const rows = db.prepare("SELECT DISTINCT proveedor FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000' ORDER BY proveedor ASC").all();
+    res.json({ ok: true, proveedores: rows.map(r => r.proveedor) });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── GET /api/gastos/check/:uuid ───────────────────────────
-router.get('/check/:uuid', async (req, res) => {
+router.get('/check/:uuid', (req, res) => {
   try {
-    const uuidParam = req.params.uuid;
     const db = getDB();
-
-    if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').select('id').eq('uuid', uuidParam).maybeSingle();
-      if (error) throw error;
-      return res.json({ ok: true, exists: !!data });
-    } else {
-      const row = db.client.prepare('SELECT id FROM gastos WHERE uuid = ?').get(uuidParam);
-      return res.json({ ok: true, exists: !!row });
-    }
+    const row = db.prepare('SELECT id FROM gastos WHERE uuid = ?').get(req.params.uuid);
+    res.json({ ok: true, exists: !!row });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── GET /api/gastos  →  List expenses ──
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   const { mes, categoria, estatus, desde, hasta, proveedor, sucursal } = req.query;
   const db = getDB();
 
   try {
-    let rows = [];
-    if (db.type === 'supabase') {
-      let query = db.client.from('gastos').select('*').neq('id', '00000000-0000-0000-0000-000000000000');
-      if (mes) query = query.eq('mes', mes);
-      if (estatus) query = query.eq('estatus', estatus);
-      if (desde) query = query.gte('fecha_factura', desde);
-      if (hasta) query = query.lte('fecha_factura', hasta);
-      if (proveedor) query = query.ilike('proveedor', `%${proveedor}%`);
-      
-      if (categoria) {
-        const catArray = categoria.split('|').filter(Boolean);
-        if (catArray.length > 0) query = query.in('categoria', catArray);
+    let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
+    const params = [];
+    if (mes) { sql += ' AND mes = ?'; params.push(mes); }
+    if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
+    if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
+    if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
+    if (proveedor) { sql += ' AND proveedor LIKE ?'; params.push(`%${proveedor}%`); }
+    
+    if (categoria) {
+      const catArray = categoria.split('|').filter(Boolean);
+      if (catArray.length > 0) {
+        sql += ` AND categoria IN (${catArray.map(() => '?').join(',')})`;
+        params.push(...catArray);
       }
-      
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      rows = data;
-    } else {
-      let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
-      const params = [];
-      if (mes) { sql += ' AND mes = ?'; params.push(mes); }
-      if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
-      if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
-      if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
-      if (proveedor) { sql += ' AND proveedor LIKE ?'; params.push(`%${proveedor}%`); }
-      
-      if (categoria) {
-        const catArray = categoria.split('|').filter(Boolean);
-        if (catArray.length > 0) {
-          sql += ` AND categoria IN (${catArray.map(() => '?').join(',')})`;
-          params.push(...catArray);
-        }
-      }
-      
-      sql += ' ORDER BY created_at DESC';
-      rows = db.client.prepare(sql).all(...params);
     }
+    
+    sql += ' ORDER BY created_at DESC';
+    const rows = db.prepare(sql).all(...params);
 
     // Filtrado en memoria por sucursal con inferencia automática para registros históricos
     let finalRows = rows;
@@ -187,206 +133,154 @@ router.get('/', async (req, res) => {
     const total = finalRows.reduce((sum, r) => sum + (r.monto || 0), 0);
     const enProceso = finalRows.filter(r => r.estatus === 'en_proceso').length;
     const pagados = finalRows.filter(r => r.estatus === 'pagado').length;
-    return res.json({ ok: true, gastos: finalRows, resumen: { total, enProceso, pagados, count: finalRows.length } });
+    
+    res.json({ ok: true, gastos: finalRows, resumen: { total, enProceso, pagados, count: finalRows.length } });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── GET /api/gastos/meses ────────────────────────────
-router.get('/meses', async (req, res) => {
+router.get('/meses', (req, res) => {
   try {
     const db = getDB();
-    if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').select('mes').neq('id', '00000000-0000-0000-0000-000000000000').order('mes', { ascending: false });
-      if (error) throw error;
-      const meses = Array.from(new Set(data.map(r => r.mes).filter(Boolean)));
-      return res.json({ ok: true, meses });
-    } else {
-      const rows = db.client.prepare("SELECT DISTINCT mes FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000' ORDER BY mes DESC").all();
-      return res.json({ ok: true, meses: rows.map(r => r.mes) });
-    }
+    const rows = db.prepare("SELECT DISTINCT mes FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000' ORDER BY mes DESC").all();
+    res.json({ ok: true, meses: rows.map(r => r.mes) });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── POST /api/gastos  →  Create expense ────────────────────
-router.post('/', async (req, res) => {
-  const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sucursal } = req.body;
+router.post('/', (req, res) => {
+  const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, sucursal } = req.body;
   if (!proveedor || !folio) return res.status(400).json({ ok: false, error: 'Proveedor y folio son requeridos.' });
 
   const mes = fechaFactura ? fechaFactura.substring(0, 7) : new Date().toISOString().substring(0, 7);
   const db = getDB();
 
   try {
-    if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').insert([{
-        uuid, proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria, mes, sheet_url: req.body.sheet_url, sucursal
-      }]).select().single();
-      if (error) throw error;
-      return res.json({ ok: true, gasto: data });
-    } else {
-      const id = uuidv4();
-      db.client.prepare(`
-        INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url, sucursal)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0, concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS', mes, req.body.sheet_url || '', sucursal || '');
-      const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
-      return res.json({ ok: true, gasto: row });
-    }
+    const id = uuidv4();
+    db.prepare(`
+      INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url, sucursal)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0,
+      concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS',
+      mes, sheet_url || '', sucursal || ''
+    );
+    
+    triggerBackup(); // Sincronización en segundo plano con Drive
+    
+    const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    res.json({ ok: true, gasto: row });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── PUT /api/gastos/:id  →  Update expense ──────────────────
-router.put('/:id', async (req, res) => {
+router.put('/:id', (req, res) => {
   const { id } = req.params;
-  const { proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sucursal } = req.body;
+  const { proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, sucursal } = req.body;
   const db = getDB();
 
   try {
-    const mes = fechaFactura ? fechaFactura.substring(0, 7) : undefined;
+    const existing = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
 
-    if (db.type === 'supabase') {
-      const updates = { proveedor, folio, fecha_factura: fechaFactura, monto, concepto, fecha_solicitud: fechaSolicitud, estatus, categoria, sucursal };
-      if (mes) updates.mes = mes;
-      
-      const { data, error } = await db.client.from('gastos').update(updates).eq('id', id).select().single();
-      if (error) throw error;
-      return res.json({ ok: true, gasto: data });
-    } else {
-      const existing = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
-      if (!existing) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
-      
-      db.client.prepare(`
-        UPDATE gastos SET
-          proveedor = ?, folio = ?, fecha_factura = ?, monto = ?,
-          concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?, sheet_url = ?, sucursal = ?
-        WHERE id = ?
-      `).run(
-        proveedor || existing.proveedor, folio || existing.folio, fechaFactura || existing.fecha_factura,
-        monto !== undefined ? monto : existing.monto, concepto || existing.concepto,
-        fechaSolicitud || existing.fecha_solicitud, estatus || existing.estatus,
-        categoria || existing.categoria, mes || existing.mes, 
-        req.body.sheet_url !== undefined ? req.body.sheet_url : existing.sheet_url,
-        sucursal !== undefined ? sucursal : existing.sucursal,
-        id
-      );
-      const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
-      return res.json({ ok: true, gasto: row });
-    }
+    const mes = fechaFactura ? fechaFactura.substring(0, 7) : existing.mes;
+
+    db.prepare(`
+      UPDATE gastos SET
+        proveedor = ?, folio = ?, fecha_factura = ?, monto = ?,
+        concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?, sheet_url = ?, sucursal = ?
+      WHERE id = ?
+    `).run(
+      proveedor || existing.proveedor, folio || existing.folio, fechaFactura || existing.fecha_factura,
+      monto !== undefined ? monto : existing.monto, concepto || existing.concepto,
+      fechaSolicitud || existing.fecha_solicitud, estatus || existing.estatus,
+      categoria || existing.categoria, mes, 
+      sheet_url !== undefined ? sheet_url : existing.sheet_url,
+      sucursal !== undefined ? sucursal : existing.sucursal,
+      id
+    );
+
+    triggerBackup(); // Sincronización en segundo plano con Drive
+
+    const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    res.json({ ok: true, gasto: row });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── PATCH /api/gastos/:id/estatus ────────────────
-router.patch('/:id/estatus', async (req, res) => {
+router.patch('/:id/estatus', (req, res) => {
   const { id } = req.params;
   const { estatus } = req.body;
   const db = getDB();
 
   try {
-    if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').update({ estatus }).eq('id', id).select().single();
-      if (error) throw error;
-      return res.json({ ok: true, gasto: data });
-    } else {
-      db.client.prepare('UPDATE gastos SET estatus = ? WHERE id = ?').run(estatus, id);
-      const row = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
-      return res.json({ ok: true, gasto: row });
-    }
+    db.prepare('UPDATE gastos SET estatus = ? WHERE id = ?').run(estatus, id);
+    
+    triggerBackup(); // Sincronización en segundo plano con Drive
+    
+    const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    res.json({ ok: true, gasto: row });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── DELETE /api/gastos/:id ────────────────
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', (req, res) => {
   const { id } = req.params;
   const db = getDB();
   try {
-    if (db.type === 'supabase') {
-      const { error } = await db.client.from('gastos').delete().eq('id', id);
-      if (error) throw error;
-    } else {
-      db.client.prepare('DELETE FROM gastos WHERE id = ?').run(id);
-    }
-    return res.json({ ok: true, mensaje: 'Gasto eliminado.' });
+    db.prepare('DELETE FROM gastos WHERE id = ?').run(id);
+    
+    triggerBackup(); // Sincronización en segundo plano con Drive
+    
+    res.json({ ok: true, mensaje: 'Gasto eliminado.' });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── GET /api/gastos/stats  →  Data for Charts ──────────────
-router.get('/stats', async (req, res) => {
+router.get('/stats', (req, res) => {
   const { desde, hasta, categoria, mes: mesFiltro, rango, sucursal } = req.query;
   const db = getDB();
 
   try {
     const proveedor = req.query.proveedor || '';
-    let rows = [];
-    
-    if (db.type === 'supabase') {
-      const now = new Date();
-      let query = db.client.from('gastos').select('monto, categoria, mes, fecha_factura, sucursal').neq('id', '00000000-0000-0000-0000-000000000000');
-      
-      if (desde) query = query.gte('fecha_factura', desde);
-      if (hasta) query = query.lte('fecha_factura', hasta);
-      if (proveedor) query = query.ilike('proveedor', `%${proveedor}%`);
+    let dateFilter = "WHERE id != '00000000-0000-0000-0000-000000000000'";
 
-      if (categoria) {
-        const catArray = categoria.split('|').filter(Boolean);
-        if (catArray.length > 0) query = query.in('categoria', catArray);
+    if (desde) dateFilter += ` AND fecha_factura >= '${desde}'`;
+    if (hasta) dateFilter += ` AND fecha_factura <= '${hasta}'`;
+    if (proveedor) dateFilter += ` AND proveedor LIKE '%${proveedor.replace(/'/g, "''")}%'`;
+
+    if (categoria) {
+      const catArray = categoria.split('|').filter(Boolean);
+      if (catArray.length > 0) {
+        dateFilter += ` AND categoria IN (${catArray.map(c => `'${c.replace(/'/g, "''")}'`).join(',')})`;
       }
-
-      if (mesFiltro) {
-        query = query.eq('mes', mesFiltro);
-      } else if (!desde && !hasta) {
-        if (rango === 'mes') {
-          query = query.eq('mes', now.toISOString().substring(0, 7));
-        } else if (rango === 'trimestre') {
-          const d = new Date(); d.setMonth(d.getMonth() - 2);
-          query = query.gte('mes', d.toISOString().substring(0, 7));
-        } else if (rango === 'anual') {
-          query = query.gte('mes', now.getFullYear() + '-01');
-        }
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      rows = data;
-    } else {
-      const sqlite = db.client;
-      let dateFilter = "WHERE id != '00000000-0000-0000-0000-000000000000'";
-
-      if (desde) dateFilter += ` AND fecha_factura >= '${desde}'`;
-      if (hasta) dateFilter += ` AND fecha_factura <= '${hasta}'`;
-      if (proveedor) dateFilter += ` AND proveedor LIKE '%${proveedor.replace(/'/g, "''")}%'`;
-
-      if (categoria) {
-        const catArray = categoria.split('|').filter(Boolean);
-        if (catArray.length > 0) {
-          dateFilter += ` AND categoria IN (${catArray.map(c => `'${c.replace(/'/g, "''")}'`).join(',')})`;
-        }
-      }
-
-      const now = new Date();
-      if (mesFiltro) {
-        dateFilter += ` AND mes = '${mesFiltro}'`;
-      } else if (rango === 'mes') {
-        dateFilter += ` AND mes = '${now.toISOString().substring(0, 7)}'`;
-      } else if (rango === 'trimestre') {
-        now.setMonth(now.getMonth() - 2);
-        dateFilter += ` AND mes >= '${now.toISOString().substring(0, 7)}'`;
-      } else if (rango === 'anual') {
-        dateFilter += ` AND SUBSTR(mes, 1, 4) = '${now.getFullYear()}'`;
-      }
-
-      rows = sqlite.prepare(`SELECT monto, categoria, mes, fecha_factura, sucursal FROM gastos ${dateFilter}`).all();
     }
+
+    const now = new Date();
+    if (mesFiltro) {
+      dateFilter += ` AND mes = '${mesFiltro}'`;
+    } else if (rango === 'mes') {
+      dateFilter += ` AND mes = '${now.toISOString().substring(0, 7)}'`;
+    } else if (rango === 'trimestre') {
+      now.setMonth(now.getMonth() - 2);
+      dateFilter += ` AND mes >= '${now.toISOString().substring(0, 7)}'`;
+    } else if (rango === 'anual') {
+      dateFilter += ` AND SUBSTR(mes, 1, 4) = '${now.getFullYear()}'`;
+    }
+
+    const rows = db.prepare(`SELECT monto, categoria, mes, fecha_factura, sucursal FROM gastos ${dateFilter}`).all();
 
     // Filtrado en memoria por sucursal con inferencia automática para registros históricos
     let finalRows = rows;
@@ -410,11 +304,12 @@ router.get('/stats', async (req, res) => {
     const monthly = Object.entries(monthlyObj).map(([label, total]) => ({ label, total })).sort((a,b) => a.label.localeCompare(b.label));
     const byCategory = Object.entries(byCategoryObj).map(([categoria, total]) => ({ categoria, total })).sort((a,b) => b.total - a.total);
 
-    return res.json({ ok: true, stats: { monthly, byCategory, yearly: [] } });
+    res.json({ ok: true, stats: { monthly, byCategory, yearly: [] } });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
+
 // ── POST /api/gastos/:id/upload-pago ────────────────
 router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
   const { id } = req.params;
@@ -423,14 +318,7 @@ router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
 
   try {
     const db = getDB();
-    let gasto;
-    if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').select('*').eq('id', id).single();
-      if (error) throw error;
-      gasto = data;
-    } else {
-      gasto = db.client.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
-    }
+    const gasto = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
     if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
 
     const client = getAuthorizedClient();
@@ -465,55 +353,148 @@ router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
     const url = driveRes.data.webViewLink;
 
     // Step 3: Update DB
-    if (db.type === 'supabase') {
-      const { error } = await db.client.from('gastos').update({ comprobante_pago_url: url, estatus: 'pagado' }).eq('id', id);
-      if (error) throw error;
-    } else {
-      db.client.prepare('UPDATE gastos SET comprobante_pago_url = ?, estatus = ? WHERE id = ?').run(url, 'pagado', id);
-    }
+    db.prepare('UPDATE gastos SET comprobante_pago_url = ?, estatus = ? WHERE id = ?').run(url, 'pagado', id);
+    
+    triggerBackup(); // Sincronización en segundo plano con Drive
 
-    return res.json({ ok: true, url });
+    res.json({ ok: true, url });
   } catch (err) {
     console.error('Upload pago error:', err);
-    return res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// ── GET /api/gastos/:id/download-comprobante ────────
-router.get('/:id/download-comprobante', async (req, res) => {
+// ── DELETE /api/gastos/:id/pago ────────────────
+router.delete('/:id/pago', (req, res) => {
   const { id } = req.params;
+  const db = getDB();
   try {
-    const db = getDB();
-    let row;
-    if (db.type === 'supabase') {
-      const { data, error } = await db.client.from('gastos').select('comprobante_pago_url').eq('id', id).single();
-      if (error) throw error;
-      row = data;
-    } else {
-      row = db.client.prepare('SELECT comprobante_pago_url FROM gastos WHERE id = ?').get(id);
-    }
-    if (!row || !row.comprobante_pago_url) return res.status(404).send('No hay comprobante.');
-    res.redirect(row.comprobante_pago_url);
+    const gasto = db.prepare('SELECT comprobante_pago_url FROM gastos WHERE id = ?').get(id);
+    if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    db.prepare('UPDATE gastos SET comprobante_pago_url = NULL, estatus = ? WHERE id = ?').run('en_proceso', id);
+    
+    triggerBackup(); // Sincronización en segundo plano con Drive
+
+    res.json({ ok: true, mensaje: 'Comprobante eliminado del registro.' });
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// ── DELETE /api/gastos/:id/pago ─────────────────────
-router.delete('/:id/pago', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const db = getDB();
-    if (db.type === 'supabase') {
-      const { error } = await db.client.from('gastos').update({ comprobante_pago_url: null, estatus: 'en_proceso' }).eq('id', id);
-      if (error) throw error;
-    } else {
-      db.client.prepare('UPDATE gastos SET comprobante_pago_url = NULL, estatus = ? WHERE id = ?').run('en_proceso', id);
-    }
-    return res.json({ ok: true });
-  } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// ── Sincronización con Google Drive ────────────────────────
+let backupTimer = null;
+let isBackingUp = false;
 
-module.exports = router;
+function triggerBackup() {
+  if (backupTimer) clearTimeout(backupTimer);
+  backupTimer = setTimeout(() => {
+    backupDatabaseToDrive().catch(err => {
+      console.error('⚠️ Error en respaldo automático a Drive:', err.message);
+    });
+  }, 3000);
+}
+
+async function backupDatabaseToDrive() {
+  if (isBackingUp) return;
+  isBackingUp = true;
+
+  try {
+    const client = getAuthorizedClient();
+    if (!client) {
+      console.log('ℹ️ Google Drive no autorizado, omitiendo respaldo de base de datos.');
+      isBackingUp = false;
+      return;
+    }
+    const drive = getGoogle().drive({ version: 'v3', auth: client });
+    const DATA_DIR = path.join(__dirname, '..', 'data');
+    const dbPath = path.join(DATA_DIR, 'gastos.db');
+
+    if (!fs.existsSync(dbPath)) {
+      console.log('ℹ️ Archivo local de base de datos no existe. Omitiendo respaldo.');
+      isBackingUp = false;
+      return;
+    }
+
+    console.log('💾 Respaldando base de datos SQLite en Google Drive...');
+    const searchRes = await drive.files.list({
+      q: "name = 'gestor_facturas_database.db' and trashed = false",
+      fields: 'files(id)'
+    });
+
+    const media = {
+      mimeType: 'application/x-sqlite3',
+      body: fs.createReadStream(dbPath)
+    };
+
+    if (searchRes.data.files.length > 0) {
+      const fileId = searchRes.data.files[0].id;
+      await drive.files.update({
+        fileId,
+        media
+      });
+      console.log('✅ Respaldo de base de datos actualizado en Google Drive.');
+    } else {
+      await drive.files.create({
+        requestBody: {
+          name: 'gestor_facturas_database.db'
+        },
+        media,
+        fields: 'id'
+      });
+      console.log('✅ Respaldo de base de datos creado en Google Drive.');
+    }
+  } catch (err) {
+    console.error('❌ Error al respaldar base de datos en Google Drive:', err.message);
+  } finally {
+    isBackingUp = false;
+  }
+}
+
+async function restoreDatabaseFromDrive() {
+  try {
+    const client = getAuthorizedClient();
+    if (!client) {
+      console.log('ℹ️ Google Drive no autorizado. Usando base de datos SQLite local vacía.');
+      return;
+    }
+    const drive = getGoogle().drive({ version: 'v3', auth: client });
+    const DATA_DIR = path.join(__dirname, '..', 'data');
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const dbPath = path.join(DATA_DIR, 'gastos.db');
+
+    console.log('🔍 Buscando respaldo de base de datos en Google Drive...');
+    const res = await drive.files.list({
+      q: "name = 'gestor_facturas_database.db' and trashed = false",
+      fields: 'files(id)'
+    });
+
+    if (res.data.files.length > 0) {
+      const fileId = res.data.files[0].id;
+      console.log(`📥 Descargando base de datos desde Google Drive (File ID: ${fileId})...`);
+
+      const dest = fs.createWriteStream(dbPath);
+      const driveRes = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'stream' }
+      );
+
+      await new Promise((resolve, reject) => {
+        driveRes.data
+          .pipe(dest)
+          .on('finish', resolve)
+          .on('error', reject);
+      });
+      console.log('✅ Base de datos SQLite restaurada con éxito.');
+    } else {
+      console.log('ℹ️ No se encontró ningún respaldo de base de datos en Google Drive. Se creará una nueva.');
+    }
+  } catch (err) {
+    console.error('⚠️ Error al restaurar base de datos desde Google Drive:', err.message);
+  }
+}
+
+module.exports = {
+  router,
+  restoreDatabaseFromDrive
+};

@@ -96,7 +96,7 @@ app.use('/api/sheets',  require('./routes/sheets'));
 app.use('/api/autotec', require('./routes/autotec-buzon'));
 app.use('/api/portal',  require('./routes/autotec-portal'));
 app.use('/api/mail',    require('./routes/mail'));
-app.use('/api/gastos',  require('./routes/gastos'));
+app.use('/api/gastos',  require('./routes/gastos').router);
 app.use('/api/takata',  takataApiAuth, require('./routes/takata')); // ← Protegida
 
 // ── Fallback para el Frontend ──────────────────────────────
@@ -113,7 +113,15 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`\n✅ SERVIDOR ACTUALIZADO`);
   console.log(`🚀 Corriendo en puerto: ${PORT}`);
   
-  // Restaurar tokens de Google desde la base de datos en el arranque del servidor
+  // 1. Restaurar base de datos SQLite desde Google Drive
+  try {
+    const { restoreDatabaseFromDrive } = require('./routes/gastos');
+    await restoreDatabaseFromDrive();
+  } catch (err) {
+    console.error('⚠️ Error al restaurar base de datos desde Google Drive:', err.message);
+  }
+
+  // 2. Restaurar tokens de Google desde la base de datos en el arranque del servidor
   try {
     const { restoreTokensFromDatabase } = require('./routes/drive');
     await restoreTokensFromDatabase();
