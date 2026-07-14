@@ -722,6 +722,55 @@ function resetAll() {
 // CONTROL DE GASTOS
 // ══════════════════════════════════════════════════════════════════════════════
 
+function updateSummaryCards(data) {
+  if (!data || !data.resumen || !data.gastos) return;
+
+  // 1. Actualizar totales generales
+  document.getElementById('gs-count').textContent = data.resumen.count;
+  document.getElementById('gs-total').textContent = fmtMonto(String(data.resumen.total), 'MXN');
+  document.getElementById('gs-proceso').textContent = data.resumen.enProceso;
+  document.getElementById('gs-pagados').textContent = data.resumen.pagados;
+
+  // 2. Calcular montos divididos para Oriente (Chiapas) y Poniente
+  let totalOriente = 0;
+  let totalPoniente = 0;
+  let countOriente = 0;
+  let countPoniente = 0;
+  let procesoOriente = 0;
+  let procesoPoniente = 0;
+  let pagadoOriente = 0;
+  let pagadoPoniente = 0;
+
+  data.gastos.forEach(g => {
+    const rawSuc = g.sucursal || (g.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
+    const isPoniente = rawSuc.includes('Poniente');
+    const monto = g.monto || 0;
+    
+    if (isPoniente) {
+      totalPoniente += monto;
+      countPoniente++;
+      if (g.estatus === 'en_proceso') procesoPoniente++;
+      if (g.estatus === 'pagado') pagadoPoniente++;
+    } else {
+      totalOriente += monto;
+      countOriente++;
+      if (g.estatus === 'en_proceso') procesoOriente++;
+      if (g.estatus === 'pagado') pagadoOriente++;
+    }
+  });
+
+  // 3. Escribir texto de desglose en el pie de las tarjetas
+  const elCountSplit = document.getElementById('gs-count-split');
+  const elTotalSplit = document.getElementById('gs-total-split');
+  const elProcesoSplit = document.getElementById('gs-proceso-split');
+  const elPagadosSplit = document.getElementById('gs-pagados-split');
+
+  if (elCountSplit) elCountSplit.textContent = `Oriente: ${countOriente} | Poniente: ${countPoniente}`;
+  if (elTotalSplit) elTotalSplit.textContent = `Oriente: ${fmtMonto(String(totalOriente), 'MXN')} | Poniente: ${fmtMonto(String(totalPoniente), 'MXN')}`;
+  if (elProcesoSplit) elProcesoSplit.textContent = `Oriente: ${procesoOriente} | Poniente: ${procesoPoniente}`;
+  if (elPagadosSplit) elPagadosSplit.textContent = `Oriente: ${pagadoOriente} | Poniente: ${pagadoPoniente}`;
+}
+
 async function loadGastos() {
   const mes = document.getElementById('filter-mes').value;
   const anio = document.getElementById('filter-anio').value;
@@ -760,13 +809,7 @@ async function loadGastos() {
       if (empty) empty.style.display = 'block';
       if (tableContainer) tableContainer.style.display = 'none';
       
-      // Still update summary if data exists but list is empty
-      if (data.resumen) {
-        document.getElementById('gs-count').textContent = data.resumen.count;
-        document.getElementById('gs-total').textContent = fmtMonto(String(data.resumen.total), 'MXN');
-        document.getElementById('gs-proceso').textContent = data.resumen.enProceso;
-        document.getElementById('gs-pagados').textContent = data.resumen.pagados;
-      }
+      updateSummaryCards(data);
       loadStats();
       return;
     }
@@ -774,11 +817,7 @@ async function loadGastos() {
     if (empty) empty.style.display = 'none';
     if (tableContainer) tableContainer.style.display = 'block';
 
-    // Update summary
-    document.getElementById('gs-count').textContent = data.resumen.count;
-    document.getElementById('gs-total').textContent = fmtMonto(String(data.resumen.total), 'MXN');
-    document.getElementById('gs-proceso').textContent = data.resumen.enProceso;
-    document.getElementById('gs-pagados').textContent = data.resumen.pagados;
+    updateSummaryCards(data);
 
     tbody.innerHTML = data.gastos.map(g => {
       const rawSuc = g.sucursal || (g.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');

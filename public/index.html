@@ -334,18 +334,22 @@
         <div class="summary-card">
           <div class="sc-label">Total Registros</div>
           <div class="sc-value" id="gs-count">0</div>
+          <div class="sc-split" id="gs-count-split" style="font-size:11px; color:var(--text-muted); margin-top:8px; border-top:1px solid rgba(0,0,0,0.06); padding-top:6px; font-weight:500;">Oriente: 0 | Poniente: 0</div>
         </div>
         <div class="summary-card">
           <div class="sc-label">Monto Total</div>
           <div class="sc-value total-val" id="gs-total">$0.00</div>
+          <div class="sc-split" id="gs-total-split" style="font-size:11px; color:var(--text-muted); margin-top:8px; border-top:1px solid rgba(0,0,0,0.06); padding-top:6px; font-weight:500;">Oriente: $0.00 | Poniente: $0.00</div>
         </div>
         <div class="summary-card">
           <div class="sc-label">En Proceso</div>
           <div class="sc-value proceso-val" id="gs-proceso">0</div>
+          <div class="sc-split" id="gs-proceso-split" style="font-size:11px; color:var(--text-muted); margin-top:8px; border-top:1px solid rgba(0,0,0,0.06); padding-top:6px; font-weight:500;">Oriente: 0 | Poniente: 0</div>
         </div>
         <div class="summary-card">
           <div class="sc-label">Pagados</div>
           <div class="sc-value pagado-val" id="gs-pagados">0</div>
+          <div class="sc-split" id="gs-pagados-split" style="font-size:11px; color:var(--text-muted); margin-top:8px; border-top:1px solid rgba(0,0,0,0.06); padding-top:6px; font-weight:500;">Oriente: 0 | Poniente: 0</div>
         </div>
       </div>
 
@@ -419,8 +423,8 @@
           <label>Sucursal</label>
           <select id="filter-sucursal" onchange="loadGastos(); loadStats()">
             <option value="">Todas</option>
-            <option value="Toyota Chiapas">Toyota Chiapas</option>
-            <option value="Toyota Farrera Poniente">Toyota Farrera Poniente</option>
+            <option value="Toyota Chiapas">Oriente (Chiapas)</option>
+            <option value="Toyota Farrera Poniente">Poniente</option>
           </select>
         </div>
         <div class="field">
