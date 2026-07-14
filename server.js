@@ -20,6 +20,45 @@ app.get('/debug-servidor', (req, res) => {
   res.json({ status: 'OK', puerto: PORT, folder: __dirname });
 });
 
+app.get('/debug-db', async (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const { getAuthorizedClient, getGoogle } = require('./routes/drive');
+  
+  const hasTokenEnv = !!process.env.GOOGLE_REFRESH_TOKEN;
+  const dbPath = path.join(__dirname, 'data', 'gastos.db');
+  const dbExists = fs.existsSync(dbPath);
+  const dbSize = dbExists ? fs.statSync(dbPath).size : 0;
+  
+  let driveStatus = 'No iniciado';
+  let driveFiles = [];
+  
+  try {
+    const client = getAuthorizedClient();
+    if (!client) {
+      driveStatus = 'Cliente de Google no autorizado (getAuthorizedClient regresó null)';
+    } else {
+      const drive = getGoogle().drive({ version: 'v3', auth: client });
+      const searchRes = await drive.files.list({
+        q: "name = 'gestor_facturas_database.db' and trashed = false",
+        fields: 'files(id, name, size)'
+      });
+      driveStatus = 'Conectado con éxito a Google Drive';
+      driveFiles = searchRes.data.files;
+    }
+  } catch (err) {
+    driveStatus = `Error al conectar a Google Drive: ${err.message}`;
+  }
+  
+  res.json({
+    hasTokenEnv,
+    dbExists,
+    dbSize,
+    driveStatus,
+    driveFiles
+  });
+});
+
 app.get('/ping', (req, res) => {
   res.send('pong');
 });
