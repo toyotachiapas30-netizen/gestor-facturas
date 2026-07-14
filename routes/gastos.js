@@ -98,13 +98,24 @@ router.get('/check/:uuid', (req, res) => {
 
 // ── GET /api/gastos  →  List expenses ──
 router.get('/', (req, res) => {
-  const { mes, categoria, estatus, desde, hasta, proveedor, sucursal } = req.query;
+  const { mes, anio, categoria, estatus, desde, hasta, proveedor, sucursal } = req.query;
   const db = getDB();
 
   try {
     let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
     const params = [];
-    if (mes) { sql += ' AND mes = ?'; params.push(mes); }
+    
+    if (mes && anio) {
+      sql += ' AND mes = ?';
+      params.push(`${anio}-${mes}`);
+    } else if (anio) {
+      sql += ' AND mes LIKE ?';
+      params.push(`${anio}-%`);
+    } else if (mes) {
+      sql += ' AND mes LIKE ?';
+      params.push(`%-${mes}`);
+    }
+    
     if (estatus) { sql += ' AND estatus = ?'; params.push(estatus); }
     if (desde) { sql += ' AND fecha_factura >= ?'; params.push(desde); }
     if (hasta) { sql += ' AND fecha_factura <= ?'; params.push(hasta); }
@@ -250,7 +261,7 @@ router.delete('/:id', (req, res) => {
 
 // ── GET /api/gastos/stats  →  Data for Charts ──────────────
 router.get('/stats', (req, res) => {
-  const { desde, hasta, categoria, mes: mesFiltro, rango, sucursal } = req.query;
+  const { desde, hasta, categoria, mes: mesFiltro, anio: anioFiltro, rango, sucursal } = req.query;
   const db = getDB();
 
   try {
@@ -268,10 +279,16 @@ router.get('/stats', (req, res) => {
       }
     }
 
+    if (mesFiltro && anioFiltro) {
+      dateFilter += ` AND mes = '${anioFiltro}-${mesFiltro}'`;
+    } else if (anioFiltro) {
+      dateFilter += ` AND mes LIKE '${anioFiltro}-%'`;
+    } else if (mesFiltro) {
+      dateFilter += ` AND mes LIKE '%-${mesFiltro}'`;
+    }
+
     const now = new Date();
-    if (mesFiltro) {
-      dateFilter += ` AND mes = '${mesFiltro}'`;
-    } else if (rango === 'mes') {
+    if (rango === 'mes') {
       dateFilter += ` AND mes = '${now.toISOString().substring(0, 7)}'`;
     } else if (rango === 'trimestre') {
       now.setMonth(now.getMonth() - 2);

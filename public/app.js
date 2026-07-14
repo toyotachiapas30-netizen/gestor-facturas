@@ -724,6 +724,7 @@ function resetAll() {
 
 async function loadGastos() {
   const mes = document.getElementById('filter-mes').value;
+  const anio = document.getElementById('filter-anio').value;
   const prov = document.getElementById('filter-proveedor')?.value || '';
   const est = document.getElementById('filter-estatus').value;
   const desde = document.getElementById('filter-desde').value;
@@ -738,6 +739,7 @@ async function loadGastos() {
   const suc = document.getElementById('filter-sucursal')?.value || '';
   let url = '/api/gastos?';
   if (mes) url += `mes=${encodeURIComponent(mes)}&`;
+  if (anio) url += `anio=${encodeURIComponent(anio)}&`;
   if (cat) url += `categoria=${encodeURIComponent(cat)}&`;
   if (prov) url += `proveedor=${encodeURIComponent(prov.trim())}&`;
   if (est) url += `estatus=${encodeURIComponent(est)}&`;
@@ -1087,7 +1089,6 @@ async function saveGasto() {
 
     closeGastoForm();
     loadGastos();
-    loadMeses();
   } catch (err) {
     showErr('err-gasto-form', 'Error: ' + err.message);
   } finally {
@@ -1098,6 +1099,7 @@ async function saveGasto() {
 async function loadStats() {
   const rango = document.getElementById('filter-rango')?.value || '30';
   const mes = document.getElementById('filter-mes')?.value || '';
+  const anio = document.getElementById('filter-anio')?.value || '';
   const prov = document.getElementById('filter-proveedor')?.value || '';
   const desde = document.getElementById('filter-desde')?.value || '';
   const hasta = document.getElementById('filter-hasta')?.value || '';
@@ -1110,7 +1112,7 @@ async function loadStats() {
 
   const suc = document.getElementById('filter-sucursal')?.value || '';
   try {
-    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&desde=${desde}&hasta=${hasta}&categoria=${cat}&proveedor=${encodeURIComponent(prov.trim())}&sucursal=${encodeURIComponent(suc)}`);
+    const r = await fetch(`/api/gastos/stats?rango=${rango}&mes=${mes}&anio=${anio}&desde=${desde}&hasta=${hasta}&categoria=${cat}&proveedor=${encodeURIComponent(prov.trim())}&sucursal=${encodeURIComponent(suc)}`);
     const data = await r.json();
     if (data.ok) renderCharts(data.stats, rango);
   } catch(e) { 
@@ -1194,24 +1196,6 @@ function selectOnlyAll() {
   }
 }
 
-async function loadMeses() {
-  try {
-    const r = await fetch('/api/gastos/meses');
-    const data = await r.json();
-    if (!data.ok) return;
-
-    const sel = document.getElementById('filter-mes');
-    const current = sel.value;
-    sel.innerHTML = '<option value="">Todos los meses</option>';
-    data.meses.forEach(m => {
-      const o = document.createElement('option');
-      o.value = m;
-      o.textContent = fmtMes(m);
-      sel.appendChild(o);
-    });
-    sel.value = current;
-  } catch {}
-}
 
 function populateCategorias() {
   // Filter Checklist
@@ -1244,9 +1228,18 @@ function populateCategorias() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  // Inicializar filtros al mes y año corriente
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+  
+  const selAnio = document.getElementById('filter-anio');
+  const selMes = document.getElementById('filter-mes');
+  if (selAnio) selAnio.value = String(currentYear);
+  if (selMes) selMes.value = currentMonth;
+
   checkGoogleAuth();
   populateCategorias();
-  loadMeses();
   loadGastos();
   loadProveedores();
 });
