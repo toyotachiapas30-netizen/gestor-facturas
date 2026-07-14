@@ -23,7 +23,7 @@ body { font-family:'Inter',sans-serif; background: url('hero_bg.jpg') center cen
 .orb { display: none; }
 
 /* ── Layout ───────────────────────── */
-.wrap { position:relative; z-index:1; max-width:1200px; margin:0 auto; padding:32px 20px 80px; }
+.wrap { position:relative; z-index:1; max-width:1550px; margin:0 auto; padding:32px 20px 80px; }
 
 /* ── Header ───────────────────────── */
 header { text-align:center; margin-bottom:24px; }
@@ -320,16 +320,18 @@ header p { color:var(--text-sub); font-size:15px; }
   color:var(--text); vertical-align:middle;
 }
 .gastos-table td.prov-cell {
-  max-width: 140px;
+  max-width: 250px;
   white-space: normal;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
   font-weight: 600;
 }
 .gastos-table td.concepto-cell {
-  min-width: 180px;
-  max-width: 250px;
+  min-width: 220px;
+  max-width: 320px;
   white-space: normal;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
   line-height: 1.45;
 }
 .gastos-table tbody tr { transition:background .2s; }
