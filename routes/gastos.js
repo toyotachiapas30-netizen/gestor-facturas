@@ -511,6 +511,19 @@ async function restoreDatabaseFromDrive() {
   }
 }
 
+// ── GET /api/gastos/:id/download-comprobante ────────
+router.get('/:id/download-comprobante', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = getDB();
+    const row = db.prepare('SELECT comprobante_pago_url FROM gastos WHERE id = ?').get(id);
+    if (!row || !row.comprobante_pago_url) return res.status(404).send('No hay comprobante.');
+    res.redirect(row.comprobante_pago_url);
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
 module.exports = {
   router,
   restoreDatabaseFromDrive
