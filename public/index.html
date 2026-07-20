@@ -23,9 +23,13 @@
       <img src="toyota-chiapas.png" alt="Toyota Chiapas" onerror="this.src='data:image/svg+xml;utf8,<svg width=\\'100\\' height=\\'40\\' xmlns=\\'http://www.w3.org/2000/svg\\'><rect width=\\'100\\' height=\\'40\\' fill=\\'%23eee\\'/><text x=\\'10\\' y=\\'25\\' font-family=\\'Arial\\' font-size=\\'12\\'>Logo 1</text></svg>'" style="height: 50px; object-fit: contain;">
       <img src="farrera-poniente.png" alt="Farrera Poniente" onerror="this.src='data:image/svg+xml;utf8,<svg width=\\'100\\' height=\\'40\\' xmlns=\\'http://www.w3.org/2000/svg\\'><rect width=\\'100\\' height=\\'40\\' fill=\\'%23eee\\'/><text x=\\'10\\' y=\\'25\\' font-family=\\'Arial\\' font-size=\\'12\\'>Logo 2</text></svg>'" style="height: 50px; object-fit: contain;">
     </div>
-    <div style="text-align: right;">
+    <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
       <h1 style="color: #1e293b; margin:0; font-size: 24px; font-weight:700;">Control de Gastos</h1>
-      <button class="btn btn-outline" style="margin-top:10px;font-size:12px;padding:7px 16px;" onclick="openSettings()">⚙️ Configuración</button>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span id="user-display-tag" style="font-size: 12px; font-weight: 600; color: #475569; background: #e2e8f0; padding: 4px 10px; border-radius: 6px; display: none;"></span>
+        <button class="btn btn-outline" style="font-size:12px;padding:6px 14px;" onclick="openSettings()">⚙️ Configuración</button>
+        <button class="btn btn-outline" style="font-size:12px;padding:6px 14px;color:#ef4444;border-color:#fca5a5;" onclick="logout()">🚪 Salir</button>
+      </div>
     </div>
   </header>
 
@@ -99,7 +103,7 @@
         <div class="alert err" id="err-step0"><span>⚠️</span><span id="err-step0-msg"></span></div>
 
         <!-- Sucursal Selection -->
-        <div class="field" style="margin-top: 20px;">
+        <div class="field" id="field-inp-sucursal" style="margin-top: 20px;">
           <label>Sucursal Destino (Para Contrarecibo) *</label>
           <select id="inp-sucursal">
             <option value="1t-dylPS1zV54AJE2eGozKJDR4RqUtNO7">Toyota Chiapas</option>
@@ -419,7 +423,7 @@
             <option value="pagado">Pagado</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field" id="field-filter-sucursal">
           <label>Sucursal</label>
           <select id="filter-sucursal" onchange="loadGastos(); loadStats()">
             <option value="">Todas</option>
@@ -545,7 +549,7 @@
           <option value="pagado">🟢 Pagado</option>
         </select>
       </div>
-      <div class="field">
+      <div class="field" id="field-gf-sucursal">
         <label>Sucursal</label>
         <select id="gf-sucursal">
           <option value="Toyota Chiapas">Toyota Chiapas</option>

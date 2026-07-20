@@ -7,6 +7,25 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 const { getAuthorizedClient, getGoogle } = require('./drive');
 
+function getGestorRole(req) {
+  const cookies = req.headers.cookie || '';
+  const found = cookies.split(';').map(c => c.trim()).find(c => c.startsWith('gestor_role='));
+  return found ? decodeURIComponent(found.split('=')[1]) : 'admin';
+}
+
+function authorizeGasto(req, gasto) {
+  if (!gasto) return false;
+  const role = getGestorRole(req);
+  if (role === 'admin') return true;
+  
+  const rawSuc = gasto.sucursal || (gasto.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
+  const isPoniente = rawSuc.includes('Poniente');
+  
+  if (role === 'poniente') return isPoniente;
+  if (role === 'oriente') return !isPoniente;
+  return false;
+}
+
 let _db = null;
 
 function getDB() {
@@ -132,12 +151,20 @@ router.get('/', (req, res) => {
     sql += ' ORDER BY created_at DESC';
     const rows = db.prepare(sql).all(...params);
 
-    // Filtrado en memoria por sucursal con inferencia automática para registros históricos
+    // Filtrado por sucursal según el rol de usuario
+    const role = getGestorRole(req);
+    let targetSucursal = sucursal;
+    if (role === 'poniente') {
+      targetSucursal = 'Toyota Farrera Poniente';
+    } else if (role === 'oriente') {
+      targetSucursal = 'Toyota Chiapas';
+    }
+
     let finalRows = rows;
-    if (sucursal) {
+    if (targetSucursal) {
       finalRows = rows.filter(r => {
         const rSuc = r.sucursal || (r.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
-        return rSuc === sucursal;
+        return rSuc === targetSucursal;
       });
     }
 
@@ -167,6 +194,14 @@ router.post('/', (req, res) => {
   const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, sucursal } = req.body;
   if (!proveedor || !folio) return res.status(400).json({ ok: false, error: 'Proveedor y folio son requeridos.' });
 
+  const role = getGestorRole(req);
+  let finalSucursal = sucursal;
+  if (role === 'poniente') {
+    finalSucursal = 'Toyota Farrera Poniente';
+  } else if (role === 'oriente') {
+    finalSucursal = 'Toyota Chiapas';
+  }
+
   const mes = fechaFactura ? fechaFactura.substring(0, 7) : new Date().toISOString().substring(0, 7);
   const db = getDB();
 
@@ -178,7 +213,7 @@ router.post('/', (req, res) => {
     `).run(
       id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0,
       concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS',
-      mes, sheet_url || '', sucursal || ''
+      mes, sheet_url || '', finalSucursal || ''
     );
     
     triggerBackup(); // Sincronización en segundo plano con Drive
@@ -200,6 +235,19 @@ router.put('/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
 
+    // Verificar autorización
+    if (!authorizeGasto(req, existing)) {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para modificar este gasto.' });
+    }
+
+    const role = getGestorRole(req);
+    let finalSucursal = sucursal;
+    if (role === 'poniente') {
+      finalSucursal = 'Toyota Farrera Poniente';
+    } else if (role === 'oriente') {
+      finalSucursal = 'Toyota Chiapas';
+    }
+
     const mes = fechaFactura ? fechaFactura.substring(0, 7) : existing.mes;
 
     db.prepare(`
@@ -213,7 +261,7 @@ router.put('/:id', (req, res) => {
       fechaSolicitud || existing.fecha_solicitud, estatus || existing.estatus,
       categoria || existing.categoria, mes, 
       sheet_url !== undefined ? sheet_url : existing.sheet_url,
-      sucursal !== undefined ? sucursal : existing.sucursal,
+      finalSucursal !== undefined ? finalSucursal : existing.sucursal,
       id
     );
 
@@ -233,6 +281,14 @@ router.patch('/:id/estatus', (req, res) => {
   const db = getDB();
 
   try {
+    const existing = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    // Verificar autorización
+    if (!authorizeGasto(req, existing)) {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para modificar este gasto.' });
+    }
+
     db.prepare('UPDATE gastos SET estatus = ? WHERE id = ?').run(estatus, id);
     
     triggerBackup(); // Sincronización en segundo plano con Drive
@@ -249,6 +305,14 @@ router.delete('/:id', (req, res) => {
   const { id } = req.params;
   const db = getDB();
   try {
+    const existing = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    // Verificar autorización
+    if (!authorizeGasto(req, existing)) {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para eliminar este gasto.' });
+    }
+
     db.prepare('DELETE FROM gastos WHERE id = ?').run(id);
     
     triggerBackup(); // Sincronización en segundo plano con Drive
@@ -299,12 +363,20 @@ router.get('/stats', (req, res) => {
 
     const rows = db.prepare(`SELECT monto, categoria, mes, fecha_factura, sucursal FROM gastos ${dateFilter}`).all();
 
-    // Filtrado en memoria por sucursal con inferencia automática para registros históricos
+    // Filtrado por sucursal según el rol de usuario
+    const role = getGestorRole(req);
+    let targetSucursal = sucursal;
+    if (role === 'poniente') {
+      targetSucursal = 'Toyota Farrera Poniente';
+    } else if (role === 'oriente') {
+      targetSucursal = 'Toyota Chiapas';
+    }
+
     let finalRows = rows;
-    if (sucursal) {
+    if (targetSucursal) {
       finalRows = rows.filter(r => {
         const rSuc = r.sucursal || (r.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
-        return rSuc === sucursal;
+        return rSuc === targetSucursal;
       });
     }
 
@@ -337,6 +409,11 @@ router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
     const db = getDB();
     const gasto = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
     if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    // Verificar autorización
+    if (!authorizeGasto(req, gasto)) {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para modificar este gasto.' });
+    }
 
     const client = getAuthorizedClient();
     if (!client) return res.status(401).json({ ok: false, error: 'Google no autorizado.' });
@@ -386,8 +463,13 @@ router.delete('/:id/pago', (req, res) => {
   const { id } = req.params;
   const db = getDB();
   try {
-    const gasto = db.prepare('SELECT comprobante_pago_url FROM gastos WHERE id = ?').get(id);
+    const gasto = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
     if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    // Verificar autorización
+    if (!authorizeGasto(req, gasto)) {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para modificar este gasto.' });
+    }
 
     db.prepare('UPDATE gastos SET comprobante_pago_url = NULL, estatus = ? WHERE id = ?').run('en_proceso', id);
     

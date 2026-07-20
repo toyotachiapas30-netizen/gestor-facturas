@@ -23,6 +23,47 @@ app.get('/ping', (req, res) => {
   res.send('pong');
 });
 
+// ── Token de sesión para Gestor ──
+const GESTOR_SESSION_TOKEN = 'gestor_2026_toyota_secure_session';
+
+function getGestorToken(req) {
+  const cookies = req.headers.cookie || '';
+  const found = cookies.split(';').map(c => c.trim()).find(c => c.startsWith('gestor_session='));
+  return found ? decodeURIComponent(found.split('=')[1]) : null;
+}
+
+function gestorAuth(req, res, next) {
+  const p = req.path;
+  
+  // Recursos permitidos sin iniciar sesión
+  const allowed = [
+    '/login.html', 
+    '/styles.css', 
+    '/hero_bg.jpg', 
+    '/toyota-chiapas.png', 
+    '/farrera-poniente.png', 
+    '/api/auth/login'
+  ];
+  
+  if (allowed.includes(p) || p === '/login') {
+    return next();
+  }
+  
+  const token = getGestorToken(req);
+  if (token === GESTOR_SESSION_TOKEN) {
+    return next();
+  }
+  
+  if (p.startsWith('/api/') || req.headers['accept']?.includes('application/json')) {
+    return res.status(401).json({ error: 'No autorizado. Inicia sesión.' });
+  }
+  
+  res.redirect('/login.html');
+}
+
+// Aplicar middleware de autenticación antes de servir archivos estáticos
+app.use(gestorAuth);
+
 // Servir archivos estáticos de forma estándar
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -87,6 +128,43 @@ function takataApiAuth(req, res, next) {
   
   return next();
 }
+
+// ── Rutas de Autenticación del Gestor ────────────────────────
+app.post('/api/auth/login', (req, res) => {
+  const { usuario, clave } = req.body || {};
+  const lowerUser = (usuario || '').trim().toLowerCase();
+  
+  if (clave === 'toyota2026' && (lowerUser === 'admin' || lowerUser === 'oriente' || lowerUser === 'poniente')) {
+    res.setHeader('Set-Cookie', [
+      `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`,
+      `gestor_role=${lowerUser}; Path=/; SameSite=Strict; Max-Age=604800`
+    ]);
+    res.json({ ok: true, role: lowerUser });
+  } else {
+    res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos.' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  res.setHeader('Set-Cookie', [
+    'gestor_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
+    'gestor_role=; Path=/; SameSite=Strict; Max-Age=0'
+  ]);
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const token = getGestorToken(req);
+  if (token !== GESTOR_SESSION_TOKEN) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  
+  const cookies = req.headers.cookie || '';
+  const foundRole = cookies.split(';').map(c => c.trim()).find(c => c.startsWith('gestor_role='));
+  const role = foundRole ? decodeURIComponent(foundRole.split('=')[1]) : 'guest';
+  
+  res.json({ ok: true, role });
+});
 
 // ── Rutas ─────────────────────────────────────────────────
 app.use('/api/sat',     require('./routes/sat'));

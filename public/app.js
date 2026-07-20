@@ -1068,6 +1068,8 @@ async function editGasto(id) {
     const defSuc = gasto.sucursal || (gasto.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
     document.getElementById('gf-sucursal').value = defSuc;
 
+    applyRoleRestrictions();
+
     document.getElementById('gastos-form-overlay').classList.add('open');
   } catch (err) {
     console.error('Edit gasto error:', err);
@@ -1087,6 +1089,9 @@ function openGastoForm() {
   document.getElementById('gf-categoria').value = '';
   document.getElementById('gf-sheet-url').value = '';
   document.getElementById('gf-sucursal').value = 'Toyota Chiapas';
+  
+  applyRoleRestrictions();
+
   hideErr('err-gasto-form');
   document.getElementById('gastos-form-overlay').classList.add('open');
 }
@@ -1265,8 +1270,91 @@ function populateCategorias() {
   }
 }
 
+// ── Authentication & Role Restrictions ────────────────────────────────────────
+let userRole = 'admin';
+
+async function checkUserRole() {
+  try {
+    const r = await fetch('/api/auth/me');
+    if (r.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
+    const data = await r.json();
+    if (data.ok) {
+      userRole = data.role;
+      
+      const tag = document.getElementById('user-display-tag');
+      if (tag) {
+        tag.style.display = 'inline-block';
+        if (userRole === 'admin') tag.textContent = '👤 Admin';
+        else if (userRole === 'poniente') tag.textContent = '📍 Poniente';
+        else if (userRole === 'oriente') tag.textContent = '📍 Oriente';
+      }
+      
+      applyRoleRestrictions();
+    }
+  } catch (err) {
+    console.error('Error checking user role:', err);
+  }
+}
+
+function applyRoleRestrictions() {
+  const filterSuc = document.getElementById('filter-sucursal');
+  const gfSuc = document.getElementById('gf-sucursal');
+  const inpSuc = document.getElementById('inp-sucursal');
+  
+  const fieldFilter = document.getElementById('field-filter-sucursal');
+  const fieldGf = document.getElementById('field-gf-sucursal');
+  const fieldInp = document.getElementById('field-inp-sucursal');
+
+  if (userRole === 'poniente') {
+    if (filterSuc) filterSuc.value = 'Toyota Farrera Poniente';
+    if (fieldFilter) fieldFilter.style.display = 'none';
+
+    if (gfSuc) {
+      gfSuc.value = 'Toyota Farrera Poniente';
+      gfSuc.disabled = true;
+    }
+    if (fieldGf) fieldGf.style.display = 'none';
+
+    if (inpSuc) {
+      inpSuc.value = '1HNbEOOw5sm37AfFZ1JSgKtKcAL-qqpjN';
+      inpSuc.disabled = true;
+    }
+    if (fieldInp) fieldInp.style.display = 'none';
+
+  } else if (userRole === 'oriente') {
+    if (filterSuc) filterSuc.value = 'Toyota Chiapas';
+    if (fieldFilter) fieldFilter.style.display = 'none';
+
+    if (gfSuc) {
+      gfSuc.value = 'Toyota Chiapas';
+      gfSuc.disabled = true;
+    }
+    if (fieldGf) fieldGf.style.display = 'none';
+
+    if (inpSuc) {
+      inpSuc.value = '1t-dylPS1zV54AJE2eGozKJDR4RqUtNO7';
+      inpSuc.disabled = true;
+    }
+    if (fieldInp) fieldInp.style.display = 'none';
+  }
+}
+
+async function logout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login.html';
+  } catch(err) {
+    console.error('Logout error:', err);
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  await checkUserRole();
+
   // Inicializar filtros al mes y año corriente
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -1276,6 +1364,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const selMes = document.getElementById('filter-mes');
   if (selAnio) selAnio.value = String(currentYear);
   if (selMes) selMes.value = currentMonth;
+
+  applyRoleRestrictions();
 
   checkGoogleAuth();
   populateCategorias();

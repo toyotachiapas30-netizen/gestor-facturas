@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acceso – Gestor de Facturas y Gastos</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: url('hero_bg.jpg') center center / cover fixed no-repeat;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    /* Fondo semitransparente para oscurecer la imagen y dar buen contraste */
+    .bg-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      z-index: 0;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(10px);
+      border: 1px solid #cbd5e1;
+      border-radius: 16px;
+      padding: 40px 32px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .logo-container {
+      display: flex;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .logo-img {
+      height: 38px;
+      object-fit: contain;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 800;
+      color: #0f172a;
+      text-align: center;
+      margin-bottom: 4px;
+      letter-spacing: -0.5px;
+    }
+
+    .subtitle {
+      text-align: center;
+      font-size: 13px;
+      color: #475569;
+      margin-bottom: 28px;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #334155;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+
+    input {
+      width: 100%;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 14px;
+      color: #0f172a;
+      font-family: inherit;
+      transition: border-color 0.2s;
+      outline: none;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+    }
+
+    input:focus {
+      border-color: #334155;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #334155, #0f172a);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: all 0.2s;
+      box-shadow: 0 4px 10px rgba(15,23,42,0.15);
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px rgba(15,23,42,0.2);
+    }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    .error-msg {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #dc2626;
+      font-size: 13px;
+      text-align: center;
+      margin-top: 14px;
+      display: none;
+      font-weight: 500;
+    }
+
+    .error-msg.visible { display: block; }
+
+    .footer-note {
+      text-align: center;
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 24px;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-overlay"></div>
+  <div class="card">
+    <div class="logo-section">
+      <div class="logo-container">
+        <img class="logo-img" src="toyota-chiapas.png" alt="Oriente">
+        <img class="logo-img" src="farrera-poniente.png" alt="Poniente">
+      </div>
+    </div>
+
+    <h1>Control de Gastos y Facturas</h1>
+    <p class="subtitle">Toyota Farrera — Acceso Interno</p>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="usuario">Usuario</label>
+        <input type="text" id="usuario" name="usuario" placeholder="Ingresa tu usuario (oriente / poniente)" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="clave">Contraseña</label>
+        <input type="password" id="clave" name="clave" placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn" id="loginBtn">Iniciar sesión</button>
+      <div class="error-msg" id="errorMsg">Usuario o contraseña incorrectos</div>
+    </form>
+
+    <p class="footer-note">Acceso exclusivo para personal de Toyota</p>
+  </div>
+
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('loginBtn');
+      const errMsg = document.getElementById('errorMsg');
+      const usuario = document.getElementById('usuario').value.trim().toLowerCase();
+      const clave   = document.getElementById('clave').value;
+
+      btn.disabled = true;
+      btn.textContent = 'Iniciando sesión...';
+      errMsg.classList.remove('visible');
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usuario, clave })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.ok) {
+          btn.textContent = '✓ Acceso concedido';
+          window.location.href = '/';
+        } else {
+          errMsg.textContent = data.error || 'Usuario o contraseña incorrectos';
+          errMsg.classList.add('visible');
+          btn.disabled = false;
+          btn.textContent = 'Iniciar sesión';
+        }
+      } catch (err) {
+        errMsg.textContent = 'Error de conexión. Intenta de nuevo.';
+        errMsg.classList.add('visible');
+        btn.disabled = false;
+        btn.textContent = 'Iniciar sesión';
+      }
+    });
+  </script>
+</body>
+</html>
