@@ -97,9 +97,23 @@ router.post('/llenar', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Faltan campos: sheetId, noFact, fecha, importe, concepto' });
 
   const sheets = getGoogle().sheets({ version: 'v4', auth: client });
-  const tabName = sheetName || 'Hoja1';
+  let tabName = sheetName || 'Hoja1';
 
   try {
+    // Autodetectar pestañas en el documento para usar la primera si la especificada no existe
+    try {
+      const doc = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+      const sheetNames = (doc.data.sheets || []).map(s => s.properties.title).filter(Boolean);
+      if (sheetNames.length > 0) {
+        if (!sheetNames.includes(tabName)) {
+          console.log(`⚠️ La pestaña "${tabName}" no existe. Autodetectando primera disponible: "${sheetNames[0]}"`);
+          tabName = sheetNames[0];
+        }
+      }
+    } catch (metaErr) {
+      console.warn('⚠️ Error al consultar pestañas de la hoja:', metaErr.message);
+    }
+
     // Write all 4 cells at once using batchUpdate
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: sheetId,
