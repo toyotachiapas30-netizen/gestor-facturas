@@ -543,6 +543,7 @@ async function backupDatabaseToDrive() {
       const fileId = searchRes.data.files[0].id;
       await drive.files.update({
         fileId,
+        requestBody: { name: 'gestor_facturas_database.db' },
         media
       });
       console.log('✅ Respaldo de base de datos actualizado con éxito en Google Drive.');
@@ -650,5 +651,6 @@ router.get('/:id/download-comprobante', async (req, res) => {
 
 module.exports = {
   router,
-  restoreDatabaseFromDrive
+  restoreDatabaseFromDrive,
+  backupDatabaseToDrive
 };
