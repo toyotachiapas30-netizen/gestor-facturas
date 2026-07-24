@@ -35,6 +35,11 @@ function getGestorToken(req) {
 function gestorAuth(req, res, next) {
   const p = req.path;
   
+  // Si la ruta es para Takata, permitir continuar (Takata tiene su propio login)
+  if (p.startsWith('/takata')) {
+    return next();
+  }
+  
   // Recursos permitidos sin iniciar sesión
   const allowed = [
     '/login.html', 
@@ -210,3 +215,19 @@ async function startServer() {
 }
 
 startServer();
+
+// ── Manejadores de Apagado Seguro (Graceful Shutdown) ──────
+async function handleShutdown(signal) {
+  console.log(`\n🛑 Servidor recibiendo señal ${signal}. Guardando respaldo final en Google Drive...`);
+  try {
+    const { backupDatabaseToDrive } = require('./routes/gastos');
+    await backupDatabaseToDrive();
+    console.log('✅ Respaldo final completado.');
+  } catch (e) {
+    console.error('⚠️ Error en respaldo final:', e.message);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+process.on('SIGINT', () => handleShutdown('SIGINT'));

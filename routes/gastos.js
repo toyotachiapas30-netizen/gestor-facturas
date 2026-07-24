@@ -190,7 +190,7 @@ router.get('/meses', (req, res) => {
 });
 
 // ── POST /api/gastos  →  Create expense ────────────────────
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, sucursal } = req.body;
   if (!proveedor || !folio) return res.status(400).json({ ok: false, error: 'Proveedor y folio son requeridos.' });
 
@@ -216,7 +216,7 @@ router.post('/', (req, res) => {
       mes, sheet_url || '', finalSucursal || ''
     );
     
-    triggerBackup(); // Sincronización en segundo plano con Drive
+    await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
     
     const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
     res.json({ ok: true, gasto: row });
@@ -226,7 +226,7 @@ router.post('/', (req, res) => {
 });
 
 // ── PUT /api/gastos/:id  →  Update expense ──────────────────
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, sucursal } = req.body;
   const db = getDB();
@@ -265,7 +265,7 @@ router.put('/:id', (req, res) => {
       id
     );
 
-    triggerBackup(); // Sincronización en segundo plano con Drive
+    await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
 
     const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
     res.json({ ok: true, gasto: row });
@@ -275,7 +275,7 @@ router.put('/:id', (req, res) => {
 });
 
 // ── PATCH /api/gastos/:id/estatus ────────────────
-router.patch('/:id/estatus', (req, res) => {
+router.patch('/:id/estatus', async (req, res) => {
   const { id } = req.params;
   const { estatus } = req.body;
   const db = getDB();
@@ -291,7 +291,7 @@ router.patch('/:id/estatus', (req, res) => {
 
     db.prepare('UPDATE gastos SET estatus = ? WHERE id = ?').run(estatus, id);
     
-    triggerBackup(); // Sincronización en segundo plano con Drive
+    await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
     
     const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
     res.json({ ok: true, gasto: row });
@@ -301,7 +301,7 @@ router.patch('/:id/estatus', (req, res) => {
 });
 
 // ── DELETE /api/gastos/:id ────────────────
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   const db = getDB();
   try {
@@ -315,7 +315,7 @@ router.delete('/:id', (req, res) => {
 
     db.prepare('DELETE FROM gastos WHERE id = ?').run(id);
     
-    triggerBackup(); // Sincronización en segundo plano con Drive
+    await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
     
     res.json({ ok: true, mensaje: 'Gasto eliminado.' });
   } catch (err) {
@@ -449,7 +449,7 @@ router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
     // Step 3: Update DB
     db.prepare('UPDATE gastos SET comprobante_pago_url = ?, estatus = ? WHERE id = ?').run(url, 'pagado', id);
     
-    triggerBackup(); // Sincronización en segundo plano con Drive
+    await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
 
     res.json({ ok: true, url });
   } catch (err) {
@@ -459,7 +459,7 @@ router.post('/:id/upload-pago', upload.single('file'), async (req, res) => {
 });
 
 // ── DELETE /api/gastos/:id/pago ────────────────
-router.delete('/:id/pago', (req, res) => {
+router.delete('/:id/pago', async (req, res) => {
   const { id } = req.params;
   const db = getDB();
   try {
@@ -473,7 +473,7 @@ router.delete('/:id/pago', (req, res) => {
 
     db.prepare('UPDATE gastos SET comprobante_pago_url = NULL, estatus = ? WHERE id = ?').run('en_proceso', id);
     
-    triggerBackup(); // Sincronización en segundo plano con Drive
+    await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
 
     res.json({ ok: true, mensaje: 'Comprobante eliminado del registro.' });
   } catch (err) {
@@ -491,31 +491,44 @@ function triggerBackup() {
     backupDatabaseToDrive().catch(err => {
       console.error('⚠️ Error en respaldo automático a Drive:', err.message);
     });
-  }, 3000);
+  }, 1000);
 }
 
 async function backupDatabaseToDrive() {
   if (isBackingUp) return;
   isBackingUp = true;
 
+  const DATA_DIR = path.join(__dirname, '..', 'data');
+  const dbPath = path.join(DATA_DIR, 'gastos.db');
+  const backupTempPath = path.join(DATA_DIR, 'gastos_backup.db');
+
   try {
     const client = getAuthorizedClient();
     if (!client) {
       console.log('ℹ️ Google Drive no autorizado, omitiendo respaldo de base de datos.');
-      isBackingUp = false;
       return;
     }
-    const drive = getGoogle().drive({ version: 'v3', auth: client });
-    const DATA_DIR = path.join(__dirname, '..', 'data');
-    const dbPath = path.join(DATA_DIR, 'gastos.db');
 
     if (!fs.existsSync(dbPath)) {
       console.log('ℹ️ Archivo local de base de datos no existe. Omitiendo respaldo.');
-      isBackingUp = false;
       return;
     }
 
-    console.log('💾 Respaldando base de datos SQLite en Google Drive...');
+    // Guard de seguridad: verificar que la base de datos local no esté vacía antes de sobrescribir
+    const db = getDB();
+    const countRow = db.prepare("SELECT count(*) as count FROM gastos").get();
+    const count = countRow ? countRow.count : 0;
+    
+    if (count === 0) {
+      console.warn('⚠️ Alerta de seguridad: La base de datos local tiene 0 registros. Omitiendo respaldo a Drive para proteger la copia remota.');
+      return;
+    }
+
+    // Generar snapshot consistente y seguro mediante la API nativa de SQLite backup
+    await db.backup(backupTempPath);
+
+    console.log(`💾 Respaldando base de datos SQLite (${count} registros) en Google Drive...`);
+    const drive = getGoogle().drive({ version: 'v3', auth: client });
     const searchRes = await drive.files.list({
       q: "name = 'gestor_facturas_database.db' and trashed = false",
       fields: 'files(id)'
@@ -523,7 +536,7 @@ async function backupDatabaseToDrive() {
 
     const media = {
       mimeType: 'application/x-sqlite3',
-      body: fs.createReadStream(dbPath)
+      body: fs.createReadStream(backupTempPath)
     };
 
     if (searchRes.data.files.length > 0) {
@@ -532,7 +545,7 @@ async function backupDatabaseToDrive() {
         fileId,
         media
       });
-      console.log('✅ Respaldo de base de datos actualizado en Google Drive.');
+      console.log('✅ Respaldo de base de datos actualizado con éxito en Google Drive.');
     } else {
       await drive.files.create({
         requestBody: {
@@ -541,16 +554,24 @@ async function backupDatabaseToDrive() {
         media,
         fields: 'id'
       });
-      console.log('✅ Respaldo de base de datos creado en Google Drive.');
+      console.log('✅ Respaldo de base de datos creado con éxito en Google Drive.');
     }
   } catch (err) {
     console.error('❌ Error al respaldar base de datos en Google Drive:', err.message);
   } finally {
     isBackingUp = false;
+    if (fs.existsSync(backupTempPath)) {
+      try { fs.unlinkSync(backupTempPath); } catch (e) {}
+    }
   }
 }
 
 async function restoreDatabaseFromDrive() {
+  const DATA_DIR = path.join(__dirname, '..', 'data');
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const dbPath = path.join(DATA_DIR, 'gastos.db');
+  const tempPath = path.join(DATA_DIR, 'gastos_download.db.tmp');
+
   try {
     const client = getAuthorizedClient();
     if (!client) {
@@ -558,9 +579,6 @@ async function restoreDatabaseFromDrive() {
       return;
     }
     const drive = getGoogle().drive({ version: 'v3', auth: client });
-    const DATA_DIR = path.join(__dirname, '..', 'data');
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    const dbPath = path.join(DATA_DIR, 'gastos.db');
 
     console.log('🔍 Buscando respaldo de base de datos en Google Drive...');
     const res = await drive.files.list({
@@ -570,9 +588,10 @@ async function restoreDatabaseFromDrive() {
 
     if (res.data.files.length > 0) {
       const fileId = res.data.files[0].id;
-      console.log(`📥 Descargando base de datos desde Google Drive (File ID: ${fileId})...`);
+      console.log(`📥 Descargando respaldo seguro desde Google Drive (File ID: ${fileId})...`);
 
-      const dest = fs.createWriteStream(dbPath);
+      // Descargar en un archivo temporal primero para nunca truncar gastos.db si la red falla
+      const dest = fs.createWriteStream(tempPath);
       const driveRes = await drive.files.get(
         { fileId, alt: 'media' },
         { responseType: 'stream' }
@@ -584,12 +603,35 @@ async function restoreDatabaseFromDrive() {
           .on('finish', resolve)
           .on('error', reject);
       });
+
+      // Verificar tamaño de archivo descargado
+      const stats = fs.statSync(tempPath);
+      if (!stats || stats.size === 0) {
+        console.error('⚠️ El archivo descargado desde Drive está vacío (0 bytes). Restauración abortada para proteger datos locales.');
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        return;
+      }
+
+      // Verificar validez SQLite del archivo descargado
+      const Database = require('better-sqlite3');
+      const testDb = new Database(tempPath);
+      const testCount = testDb.prepare("SELECT count(*) as count FROM gastos").get().count;
+      testDb.close();
+
+      console.log(`✅ Archivo restaurado verificado correctamente con ${testCount} registros.`);
+
+      // Copiar atómicamente el archivo verificado a la base de datos de producción
+      fs.copyFileSync(tempPath, dbPath);
+      fs.unlinkSync(tempPath);
       console.log('✅ Base de datos SQLite restaurada con éxito.');
     } else {
-      console.log('ℹ️ No se encontró ningún respaldo de base de datos en Google Drive. Se creará una nueva.');
+      console.log('ℹ️ No se encontró ningún respaldo de base de datos en Google Drive.');
     }
   } catch (err) {
     console.error('⚠️ Error al restaurar base de datos desde Google Drive:', err.message);
+    if (fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath); } catch (e) {}
+    }
   }
 }
 
