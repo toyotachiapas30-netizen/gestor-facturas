@@ -380,6 +380,9 @@ async function subirDrive() {
     const link=document.getElementById('drive-link'); link.href=data.folderLink;
     state.driveOk=true;
     document.getElementById('btn-next2').disabled=false;
+    
+    // Auto-registrar inmediatamente el gasto al subir los archivos a Drive
+    await autoRegistrarGasto();
   } catch(err) {
     showErr('err-step2','Error: '+err.message);
   } finally {

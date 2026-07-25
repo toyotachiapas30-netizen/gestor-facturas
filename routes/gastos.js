@@ -206,6 +206,32 @@ router.post('/', async (req, res) => {
   const db = getDB();
 
   try {
+    if (uuid && uuid.trim() !== '') {
+      const existing = db.prepare('SELECT * FROM gastos WHERE uuid = ?').get(uuid.trim());
+      if (existing) {
+        db.prepare(`
+          UPDATE gastos SET
+            proveedor = ?, folio = ?, fecha_factura = ?, monto = ?,
+            concepto = CASE WHEN ? != '' THEN ? ELSE concepto END,
+            categoria = CASE WHEN ? != '' THEN ? ELSE categoria END,
+            sheet_url = CASE WHEN ? != '' THEN ? ELSE sheet_url END,
+            sucursal = CASE WHEN ? != '' THEN ? ELSE sucursal END
+          WHERE id = ?
+        `).run(
+          proveedor, folio, fechaFactura, monto,
+          concepto || '', concepto || '',
+          categoria || '', categoria || '',
+          sheet_url || '', sheet_url || '',
+          finalSucursal || '', finalSucursal || '',
+          existing.id
+        );
+        
+        await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
+        const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(existing.id);
+        return res.json({ ok: true, gasto: row });
+      }
+    }
+
     const id = uuidv4();
     db.prepare(`
       INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url, sucursal)
