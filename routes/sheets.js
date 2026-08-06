@@ -97,12 +97,34 @@ router.post('/llenar', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Faltan campos: sheetId, noFact, fecha, importe, concepto' });
 
   const sheets = getGoogle().sheets({ version: 'v4', auth: client });
+  const drive = getGoogle().drive({ version: 'v3', auth: client });
   let tabName = sheetName || 'Hoja1';
 
   try {
-    // Autodetectar pestañas en el documento para usar la primera si la especificada no existe
+    // 1. Crear copia individual del contrarecibo en la carpeta de respaldos de Drive
+    const DRIVE_BACKUP_FOLDER = '1xLYLOfX581ZV7irORRVDP8JxhS4KTkks';
+    let targetSheetId = sheetId;
+    let sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}`;
+
     try {
-      const doc = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+      const copyRes = await drive.files.copy({
+        fileId: sheetId,
+        requestBody: {
+          name: `Contrarecibo - ${noFact} - ${new Date().toISOString().split('T')[0]}`,
+          parents: [DRIVE_BACKUP_FOLDER]
+        },
+        fields: 'id, webViewLink'
+      });
+      targetSheetId = copyRes.data.id;
+      sheetUrl = copyRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${targetSheetId}`;
+      console.log(`✅ Copia individual de contrarecibo creada en Drive: ${targetSheetId}`);
+    } catch (copyErr) {
+      console.error('⚠️ Error al crear copia en Drive, escribiendo en plantilla:', copyErr.message);
+    }
+
+    // 2. Autodetectar pestañas en el documento para usar la primera si la especificada no existe
+    try {
+      const doc = await sheets.spreadsheets.get({ spreadsheetId: targetSheetId });
       const sheetNames = (doc.data.sheets || []).map(s => s.properties.title).filter(Boolean);
       if (sheetNames.length > 0) {
         if (!sheetNames.includes(tabName)) {
@@ -114,9 +136,9 @@ router.post('/llenar', async (req, res) => {
       console.warn('⚠️ Error al consultar pestañas de la hoja:', metaErr.message);
     }
 
-    // Write all 4 cells at once using batchUpdate
+    // 3. Escribir los 4 valores directamente en la COPIA INDIVIDUAL
     await sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: sheetId,
+      spreadsheetId: targetSheetId,
       requestBody: {
         valueInputOption: 'USER_ENTERED',
         data: [
@@ -128,25 +150,7 @@ router.post('/llenar', async (req, res) => {
       }
     });
 
-    // ── Backup Copy ──────────────────────────────────
-    const DRIVE_BACKUP_FOLDER = '1xLYLOfX581ZV7irORRVDP8JxhS4KTkks';
-    try {
-      const drive = getGoogle().drive({ version: 'v3', auth: client });
-      await drive.files.copy({
-        fileId: sheetId,
-        requestBody: {
-          name: `Respaldo - ${noFact} - ${new Date().toISOString().split('T')[0]}`,
-          parents: [DRIVE_BACKUP_FOLDER]
-        }
-      });
-      console.log('✅ Respaldo de contrarecibo creado en Drive');
-    } catch (copyErr) {
-      console.error('Error al crear respaldo:', copyErr.message);
-      // Don't fail the whole request if only backup fails
-    }
-
-    const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}`;
-    return res.json({ ok: true, sheetUrl, mensaje: 'Contrarecibo llenado correctamente y respaldado' });
+    return res.json({ ok: true, sheetUrl, mensaje: 'Contrarecibo individual generado, llenado y respaldado correctamente' });
   } catch (err) {
     console.error('Sheets error:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
