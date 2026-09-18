@@ -812,6 +812,8 @@ async function loadGastos() {
     const empty = document.getElementById('gastos-empty');
     const tableContainer = document.getElementById('gastos-table-container');
 
+    gastosCache = (data.ok && data.gastos) ? data.gastos : [];
+
     if (!data.ok || !data.gastos || data.gastos.length === 0) {
       tbody.innerHTML = '';
       if (empty) empty.style.display = 'block';
@@ -1028,6 +1030,108 @@ async function borrarFactura(id) {
     loadGastos();
   } catch (err) {
     alert('Error al eliminar factura: ' + err.message);
+  }
+}
+
+// ── Memo de Comprobantes Pendientes ──
+function abrirMemoPendientes() {
+  const pendientes = (gastosCache || []).filter(g => g.estatus !== 'pagado' || !g.comprobante_pago_url);
+
+  if (pendientes.length === 0) {
+    alert('✅ ¡Excelente! No hay comprobantes de pago pendientes con los filtros actualmente seleccionados.');
+    return;
+  }
+
+  // Contexto de los filtros para el subtítulo
+  const mesEl = document.getElementById('filter-mes');
+  const anioEl = document.getElementById('filter-anio');
+  const sucEl = document.getElementById('filter-sucursal');
+  const mesNombre = (mesEl && mesEl.options[mesEl.selectedIndex]) ? mesEl.options[mesEl.selectedIndex].text : '';
+  const anioVal = anioEl ? anioEl.value : '';
+  const sucVal = (sucEl && sucEl.options[sucEl.selectedIndex]) ? sucEl.options[sucEl.selectedIndex].text : 'Todas';
+
+  let sub = `${pendientes.length} pago(s) pendiente(s)`;
+  if (mesNombre && mesNombre !== 'Todos los meses') sub += ` • Mes: ${mesNombre}`;
+  if (anioVal) sub += ` ${anioVal}`;
+  if (sucVal && sucVal !== 'Todas') sub += ` • Sucursal: ${sucVal}`;
+  const subEl = document.getElementById('memo-subtitle');
+  if (subEl) subEl.textContent = sub;
+
+  // Calcular total
+  let totalMonto = 0;
+
+  // Construir cuerpo del memo según lo solicitado exactamente
+  let cuerpo = `Buen día, ¿me pueden apoyar con los comprobantes de pago faltantes?\n\n`;
+  cuerpo += `Detalle de pagos pendientes:\n`;
+  cuerpo += `──────────────────────────────────────────────────\n\n`;
+
+  pendientes.forEach((g, idx) => {
+    const montoNum = parseFloat(g.monto) || 0;
+    totalMonto += montoNum;
+    const fechaSol = g.fecha_solicitud ? fmtShortDate(g.fecha_solicitud) : (g.fecha_factura ? fmtShortDate(g.fecha_factura) : '—');
+    const montoFmt = fmtMonto(String(g.monto), 'MXN');
+
+    cuerpo += `${idx + 1}. Proveedor: ${g.proveedor || '—'}\n`;
+    cuerpo += `   • Folio: ${g.folio || '—'}\n`;
+    cuerpo += `   • Fecha de Solicitud: ${fechaSol}\n`;
+    cuerpo += `   • Monto: ${montoFmt}\n`;
+    cuerpo += `   • Concepto: ${g.concepto || '—'}\n\n`;
+  });
+
+  cuerpo += `──────────────────────────────────────────────────\n`;
+  cuerpo += `Total de pagos pendientes: ${pendientes.length}\n`;
+  cuerpo += `Monto total acumulado: ${fmtMonto(String(totalMonto), 'MXN')}\n\n`;
+  cuerpo += `Quedo atento. Muchas gracias.`;
+
+  const ta = document.getElementById('memo-cuerpo');
+  if (ta) ta.value = cuerpo;
+
+  // Asunto
+  let asunto = `Solicitud de Comprobantes de Pago Faltantes`;
+  if (mesNombre && mesNombre !== 'Todos los meses') asunto += ` - ${mesNombre} ${anioVal}`;
+  if (sucVal && sucVal !== 'Todas') asunto += ` (${sucVal})`;
+  const asEl = document.getElementById('memo-asunto');
+  if (asEl) asEl.value = asunto;
+
+  const overlay = document.getElementById('memo-pendientes-overlay');
+  if (overlay) overlay.classList.add('open');
+}
+
+function cerrarMemoPendientes() {
+  const overlay = document.getElementById('memo-pendientes-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+function enviarMemoMailto() {
+  const dest = document.getElementById('memo-destinatario')?.value.trim() || '';
+  const asunto = document.getElementById('memo-asunto')?.value.trim() || 'Solicitud de Comprobantes de Pago Faltantes';
+  const cuerpo = document.getElementById('memo-cuerpo')?.value || '';
+
+  const mailtoUrl = `mailto:${encodeURIComponent(dest)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  window.open(mailtoUrl, '_blank');
+}
+
+async function copiarMemoAlPortapapeles() {
+  const cuerpo = document.getElementById('memo-cuerpo')?.value || '';
+  const lbl = document.getElementById('lbl-copiar-memo');
+  try {
+    await navigator.clipboard.writeText(cuerpo);
+    if (lbl) {
+      const orig = lbl.textContent;
+      lbl.textContent = '¡Copiado!';
+      setTimeout(() => { lbl.textContent = orig; }, 2000);
+    }
+  } catch (err) {
+    const ta = document.getElementById('memo-cuerpo');
+    if (ta) {
+      ta.select();
+      document.execCommand('copy');
+      if (lbl) {
+        const orig = lbl.textContent;
+        lbl.textContent = '¡Copiado!';
+        setTimeout(() => { lbl.textContent = orig; }, 2000);
+      }
+    }
   }
 }
 

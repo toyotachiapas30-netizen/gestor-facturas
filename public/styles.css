@@ -401,12 +401,12 @@ header p { color:var(--text-sub); font-size:15px; }
 .tbl-btn:hover { border-color:var(--danger); color:var(--danger); background:rgba(239,68,68,.1); }
 .tbl-btn.edit:hover { border-color:var(--accent); color:var(--accent); background:rgba(59,130,246,.1); }
 
-/* ── Gastos form overlay ──────────── */
-#gastos-form-overlay {
+/* ── Gastos form & Memo overlays ──────────── */
+#gastos-form-overlay, #memo-pendientes-overlay {
   display:none; position:fixed; inset:0; background:rgba(0,0,0,.7);
   z-index:100; align-items:center; justify-content:center;
 }
-#gastos-form-overlay.open { display:flex; }
+#gastos-form-overlay.open, #memo-pendientes-overlay.open { display:flex; }
 .gastos-form-box {
   background:#ffffff; border:1px solid var(--border); border-radius:var(--r);
   padding:32px; width:min(600px,94vw); max-height:90vh; overflow-y:auto; box-shadow: 0 10px 40px rgba(0,0,0,.15);
