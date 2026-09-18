@@ -381,8 +381,12 @@ async function subirDrive() {
     state.driveOk=true;
     document.getElementById('btn-next2').disabled=false;
     
+    // Capturar enlace del PDF de factura
+    const pdfArchivo = data.archivos ? data.archivos.find(a => a.tipo === 'PDF') : null;
+    state.facturaUrl = pdfArchivo ? pdfArchivo.link : null;
+
     // Auto-registrar inmediatamente el gasto al subir los archivos a Drive
-    await autoRegistrarGasto();
+    await autoRegistrarGasto(null, null, null, state.facturaUrl);
   } catch(err) {
     showErr('err-step2','Error: '+err.message);
   } finally {
@@ -556,7 +560,7 @@ async function llenarSheet() {
 
     // Auto-register as expense
     const categoria = document.getElementById('inp-categoria').value || 'OTROS';
-    await autoRegistrarGasto(concepto, categoria, data.sheetUrl);
+    await autoRegistrarGasto(concepto, categoria, data.sheetUrl, state.facturaUrl);
 
     document.getElementById('final-success').style.display='flex';
     document.getElementById('btn-sheets-fill').style.display='none';
@@ -568,7 +572,7 @@ async function llenarSheet() {
 }
 
 // Auto-register expense at the end of the flow
-async function autoRegistrarGasto(concepto, categoria, sheetUrl) {
+async function autoRegistrarGasto(concepto, categoria, sheetUrl, facturaUrl) {
   if (!state.cfdi) return;
   const c = state.cfdi;
   const fechaFactura = c.fecha ? c.fecha.substring(0, 10) : '';
@@ -591,6 +595,7 @@ async function autoRegistrarGasto(concepto, categoria, sheetUrl) {
         estatus: 'en_proceso',
         categoria: categoria || 'OTROS',
         sheet_url: sheetUrl || '',
+        factura_url: facturaUrl || state.facturaUrl || '',
         sucursal: sucursalName
       })
     });
@@ -839,7 +844,7 @@ async function loadGastos() {
                   <a href="/api/gastos/${g.id}/download-comprobante" target="_blank" title="Descargar Comprobante" style="font-size:18px;text-decoration:none;">📄</a>
                   <button class="pago-delete-btn" onclick="borrarComprobante('${g.id}')" title="Eliminar Comprobante">×</button>
                 </div>` : 
-                `<span class="pago-placeholder" style="opacity:0.3;cursor:default;" title="Arrastra el PDF aquí">＋</span>`
+                `<span class="pago-placeholder" onclick="triggerUploadPago('${g.id}')" style="opacity:0.3;cursor:pointer;" title="Clic para subir o arrastra el PDF aquí">＋</span>`
               }
             </div>
           </td>
@@ -847,6 +852,17 @@ async function loadGastos() {
           <td style="white-space:nowrap;">${fmtShortDate(g.fecha_solicitud)}</td>
           <td style="text-align:center;">
             ${g.sheet_url ? `<a href="${g.sheet_url}" target="_blank" title="Ver Contrarecibo" style="font-size:16px;text-decoration:none;">📊</a>` : '—'}
+          </td>
+          <td class="factura-cell" style="text-align:center;" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handleFacturaDrop(event, '${g.id}')">
+            <div class="factura-cell-content">
+              ${g.factura_url ? 
+                `<div class="pago-link-wrap">
+                  <a href="/api/gastos/${g.id}/download-factura" target="_blank" title="Ver Factura (PDF)" style="font-size:18px;text-decoration:none;">🧾</a>
+                  <button class="pago-delete-btn" onclick="borrarFactura('${g.id}')" title="Eliminar Factura">×</button>
+                </div>` : 
+                `<span class="pago-placeholder" onclick="triggerUploadFactura('${g.id}')" style="opacity:0.3;cursor:pointer;" title="Clic para subir o arrastra el PDF de la factura">＋</span>`
+              }
+            </div>
           </td>
           <td>
             <span class="estatus-tag ${g.estatus}" onclick="toggleEstatus('${g.id}','${g.estatus}')" style="cursor:pointer" title="Hacer clic para cambiar estado">
@@ -928,6 +944,90 @@ async function borrarComprobante(id) {
     loadGastos();
   } catch (err) {
     alert('Error al eliminar: ' + err.message);
+  }
+}
+
+function triggerUploadPago(id) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/pdf';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await uploadComprobante(id, file);
+    } catch (err) {
+      alert('Error al subir comprobante: ' + err.message);
+    }
+  };
+  input.click();
+}
+
+// ── Manejo de Factura (PDF) ──
+function triggerUploadFactura(id) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/pdf';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await uploadFactura(id, file);
+    } catch (err) {
+      alert('Error al subir factura: ' + err.message);
+    }
+  };
+  input.click();
+}
+
+async function handleFacturaDrop(e, id) {
+  e.preventDefault();
+  const cell = e.currentTarget;
+  cell.classList.remove('drag-over');
+
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+
+  if (file.type !== 'application/pdf') {
+    alert('Por favor, sube solo archivos PDF.');
+    return;
+  }
+
+  const content = cell.querySelector('.factura-cell-content');
+  const oldHtml = content ? content.innerHTML : '';
+  if (content) content.innerHTML = '<span class="spin-small"></span>';
+
+  try {
+    await uploadFactura(id, file);
+  } catch (err) {
+    alert('Error al subir factura: ' + err.message);
+    if (content) content.innerHTML = oldHtml;
+  }
+}
+
+async function uploadFactura(id, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+
+  const r = await fetch(`/api/gastos/${id}/upload-factura`, {
+    method: 'POST',
+    body: fd
+  });
+  const data = await r.json();
+  if (!data.ok) throw new Error(data.error);
+
+  loadGastos();
+}
+
+async function borrarFactura(id) {
+  if (!confirm('¿Estás seguro de que deseas eliminar el enlace a esta factura?')) return;
+  try {
+    const r = await fetch(`/api/gastos/${id}/factura`, { method: 'DELETE' });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error);
+    loadGastos();
+  } catch (err) {
+    alert('Error al eliminar factura: ' + err.message);
   }
 }
 
@@ -1067,6 +1167,7 @@ async function editGasto(id) {
     document.getElementById('gf-estatus').value = gasto.estatus || 'en_proceso';
     document.getElementById('gf-categoria').value = gasto.categoria || '';
     document.getElementById('gf-sheet-url').value = gasto.sheet_url || '';
+    document.getElementById('gf-factura-url').value = gasto.factura_url || '';
     
     const defSuc = gasto.sucursal || (gasto.categoria === 'TOYOTA PONIENTE' ? 'Toyota Farrera Poniente' : 'Toyota Chiapas');
     document.getElementById('gf-sucursal').value = defSuc;
@@ -1091,6 +1192,7 @@ function openGastoForm() {
   document.getElementById('gf-estatus').value = 'en_proceso';
   document.getElementById('gf-categoria').value = '';
   document.getElementById('gf-sheet-url').value = '';
+  document.getElementById('gf-factura-url').value = '';
   document.getElementById('gf-sucursal').value = 'Toyota Chiapas';
   
   applyRoleRestrictions();
@@ -1122,6 +1224,7 @@ async function saveGasto() {
     estatus: document.getElementById('gf-estatus').value,
     categoria: document.getElementById('gf-categoria').value,
     sheet_url: document.getElementById('gf-sheet-url').value.trim(),
+    factura_url: document.getElementById('gf-factura-url').value.trim(),
     sucursal: document.getElementById('gf-sucursal').value
   };
 

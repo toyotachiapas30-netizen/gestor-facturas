@@ -367,10 +367,10 @@ header p { color:var(--text-sub); font-size:15px; }
 /* ── Monto in table ───────────────── */
 .monto-cell { font-weight:700; font-size:14px; color:#60a5fa; white-space:nowrap; }
 
-/* ── Comprobante de Pago cell ─────── */
-.pago-cell { text-align: center; min-width: 140px; transition: background 0.2s; position: relative; }
-.pago-cell.drag-over { background: rgba(59, 130, 246, 0.15) !important; outline: 2px dashed var(--accent); }
-.pago-cell-content { display: flex; align-items: center; justify-content: center; min-height: 32px; }
+/* ── Comprobante de Pago & Factura cells ─────── */
+.pago-cell, .factura-cell { text-align: center; min-width: 80px; transition: background 0.2s; position: relative; }
+.pago-cell.drag-over, .factura-cell.drag-over { background: rgba(59, 130, 246, 0.15) !important; outline: 2px dashed var(--accent); }
+.pago-cell-content, .factura-cell-content { display: flex; align-items: center; justify-content: center; min-height: 32px; }
 .pago-link-wrap { position: relative; display: flex; align-items: center; gap: 4px; }
 .pago-delete-btn {
   background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);

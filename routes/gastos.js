@@ -62,6 +62,7 @@ function getDB() {
   try { _db.exec(`ALTER TABLE gastos ADD COLUMN sheet_url TEXT`); } catch (err) {}
   try { _db.exec(`ALTER TABLE gastos ADD COLUMN comprobante_pago_url TEXT`); } catch (err) {}
   try { _db.exec(`ALTER TABLE gastos ADD COLUMN sucursal TEXT`); } catch (err) {}
+  try { _db.exec(`ALTER TABLE gastos ADD COLUMN factura_url TEXT`); } catch (err) {}
 
   return _db;
 }
@@ -191,7 +192,7 @@ router.get('/meses', (req, res) => {
 
 // ── POST /api/gastos  →  Create expense ────────────────────
 router.post('/', async (req, res) => {
-  const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, sucursal } = req.body;
+  const { uuid, proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, factura_url, facturaUrl, sucursal } = req.body;
   if (!proveedor || !folio) return res.status(400).json({ ok: false, error: 'Proveedor y folio son requeridos.' });
 
   const role = getGestorRole(req);
@@ -202,6 +203,7 @@ router.post('/', async (req, res) => {
     finalSucursal = 'Toyota Chiapas';
   }
 
+  const finalFacturaUrl = factura_url || facturaUrl || '';
   const mes = fechaFactura ? fechaFactura.substring(0, 7) : new Date().toISOString().substring(0, 7);
   const db = getDB();
 
@@ -215,6 +217,7 @@ router.post('/', async (req, res) => {
             concepto = CASE WHEN ? != '' THEN ? ELSE concepto END,
             categoria = CASE WHEN ? != '' THEN ? ELSE categoria END,
             sheet_url = CASE WHEN ? != '' THEN ? ELSE sheet_url END,
+            factura_url = CASE WHEN ? != '' THEN ? ELSE factura_url END,
             sucursal = CASE WHEN ? != '' THEN ? ELSE sucursal END
           WHERE id = ?
         `).run(
@@ -222,6 +225,7 @@ router.post('/', async (req, res) => {
           concepto || '', concepto || '',
           categoria || '', categoria || '',
           sheet_url || '', sheet_url || '',
+          finalFacturaUrl || '', finalFacturaUrl || '',
           finalSucursal || '', finalSucursal || '',
           existing.id
         );
@@ -234,12 +238,12 @@ router.post('/', async (req, res) => {
 
     const id = uuidv4();
     db.prepare(`
-      INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url, sucursal)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO gastos (id, uuid, proveedor, folio, fecha_factura, monto, concepto, fecha_solicitud, estatus, categoria, mes, sheet_url, factura_url, sucursal)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, uuid || '', proveedor, folio || '', fechaFactura || '', monto || 0,
       concepto || '', fechaSolicitud || '', estatus || 'en_proceso', categoria || 'OTROS',
-      mes, sheet_url || '', finalSucursal || ''
+      mes, sheet_url || '', finalFacturaUrl || '', finalSucursal || ''
     );
     
     await backupDatabaseToDrive(); // Respaldo inmediato a Google Drive
@@ -254,7 +258,7 @@ router.post('/', async (req, res) => {
 // ── PUT /api/gastos/:id  →  Update expense ──────────────────
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, sucursal } = req.body;
+  const { proveedor, folio, fechaFactura, monto, concepto, fechaSolicitud, estatus, categoria, sheet_url, factura_url, facturaUrl, sucursal } = req.body;
   const db = getDB();
 
   try {
@@ -274,12 +278,13 @@ router.put('/:id', async (req, res) => {
       finalSucursal = 'Toyota Chiapas';
     }
 
+    const finalFacturaUrl = factura_url !== undefined ? factura_url : (facturaUrl !== undefined ? facturaUrl : existing.factura_url);
     const mes = fechaFactura ? fechaFactura.substring(0, 7) : existing.mes;
 
     db.prepare(`
       UPDATE gastos SET
         proveedor = ?, folio = ?, fecha_factura = ?, monto = ?,
-        concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?, sheet_url = ?, sucursal = ?
+        concepto = ?, fecha_solicitud = ?, estatus = ?, categoria = ?, mes = ?, sheet_url = ?, factura_url = ?, sucursal = ?
       WHERE id = ?
     `).run(
       proveedor || existing.proveedor, folio || existing.folio, fechaFactura || existing.fecha_factura,
@@ -287,6 +292,7 @@ router.put('/:id', async (req, res) => {
       fechaSolicitud || existing.fecha_solicitud, estatus || existing.estatus,
       categoria || existing.categoria, mes, 
       sheet_url !== undefined ? sheet_url : existing.sheet_url,
+      finalFacturaUrl !== undefined ? finalFacturaUrl : existing.factura_url,
       finalSucursal !== undefined ? finalSucursal : existing.sucursal,
       id
     );
@@ -507,6 +513,86 @@ router.delete('/:id/pago', async (req, res) => {
   }
 });
 
+// ── POST /api/gastos/:id/upload-factura ──────────────
+router.post('/:id/upload-factura', upload.single('file'), async (req, res) => {
+  const { id } = req.params;
+  const file = req.file;
+  if (!file) return res.status(400).json({ ok: false, error: 'No se recibió archivo.' });
+
+  try {
+    const db = getDB();
+    const gasto = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    // Verificar autorización
+    if (!authorizeGasto(req, gasto)) {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para modificar este gasto.' });
+    }
+
+    const client = getAuthorizedClient();
+    if (!client) return res.status(401).json({ ok: false, error: 'Google no autorizado.' });
+    const drive = getGoogle().drive({ version: 'v3', auth: client });
+
+    // Buscar o crear carpeta del proveedor
+    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    const searchRes = await drive.files.list({
+      q: `'${rootFolderId}' in parents and name='${gasto.proveedor}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id)'
+    });
+    
+    let folderId;
+    if (searchRes.data.files.length > 0) {
+      folderId = searchRes.data.files[0].id;
+    } else {
+      const newFolder = await drive.files.create({
+        requestBody: { name: gasto.proveedor, mimeType: 'application/vnd.google-apps.folder', parents: [rootFolderId] },
+        fields: 'id'
+      });
+      folderId = newFolder.data.id;
+    }
+
+    // Subir PDF de la factura
+    const driveRes = await drive.files.create({
+      requestBody: { name: `FACTURA_${gasto.folio || 'S-F'}_${file.originalname}`, parents: [folderId] },
+      media: { mimeType: 'application/pdf', body: require('stream').Readable.from(file.buffer) },
+      fields: 'id, webViewLink'
+    });
+
+    const url = driveRes.data.webViewLink;
+
+    // Actualizar BD
+    db.prepare('UPDATE gastos SET factura_url = ? WHERE id = ?').run(url, id);
+    await backupDatabaseToDrive();
+
+    res.json({ ok: true, url });
+  } catch (err) {
+    console.error('Upload factura error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── DELETE /api/gastos/:id/factura ──────────────────
+router.delete('/:id/factura', async (req, res) => {
+  const { id } = req.params;
+  const db = getDB();
+  try {
+    const gasto = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    if (!gasto) return res.status(404).json({ ok: false, error: 'Gasto no encontrado.' });
+
+    // Verificar autorización
+    if (!authorizeGasto(req, gasto)) {
+      return res.status(403).json({ ok: false, error: 'No tienes permisos para modificar este gasto.' });
+    }
+
+    db.prepare('UPDATE gastos SET factura_url = NULL WHERE id = ?').run(id);
+    await backupDatabaseToDrive();
+
+    res.json({ ok: true, mensaje: 'Factura eliminada del registro.' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Sincronización con Google Drive ────────────────────────
 let backupTimer = null;
 let isBackingUp = false;
@@ -670,6 +756,52 @@ router.get('/:id/download-comprobante', async (req, res) => {
     const row = db.prepare('SELECT comprobante_pago_url FROM gastos WHERE id = ?').get(id);
     if (!row || !row.comprobante_pago_url) return res.status(404).send('No hay comprobante.');
     res.redirect(row.comprobante_pago_url);
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+
+// ── GET /api/gastos/:id/download-factura ────────────
+router.get('/:id/download-factura', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = getDB();
+    const row = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    if (!row) return res.status(404).send('Gasto no encontrado.');
+
+    if (row.factura_url && row.factura_url.trim() !== '') {
+      return res.redirect(row.factura_url);
+    }
+
+    // Búsqueda dinámica en Google Drive si aún no está enlazado directamente
+    const client = getAuthorizedClient();
+    if (client) {
+      const drive = getGoogle().drive({ version: 'v3', auth: client });
+      let query = "trashed = false and mimeType = 'application/pdf'";
+      if (row.uuid && row.uuid.trim() !== '') {
+        query += ` and name contains '${row.uuid.trim()}'`;
+      } else if (row.folio && row.folio !== '—' && row.folio.trim() !== '') {
+        query += ` and name contains '${row.folio.trim()}'`;
+      }
+
+      const searchRes = await drive.files.list({
+        q: query,
+        fields: 'files(id, name, webViewLink)',
+        pageSize: 10
+      });
+
+      if (searchRes.data.files && searchRes.data.files.length > 0) {
+        // Excluir archivos que sean comprobantes de pago
+        const match = searchRes.data.files.find(f => !f.name.toUpperCase().startsWith('PAGO_')) || searchRes.data.files[0];
+        if (match && match.webViewLink) {
+          db.prepare('UPDATE gastos SET factura_url = ? WHERE id = ?').run(match.webViewLink, id);
+          await backupDatabaseToDrive();
+          return res.redirect(match.webViewLink);
+        }
+      }
+    }
+
+    return res.status(404).send('No se encontró archivo de factura.');
   } catch (err) {
     res.status(500).send(err.message);
   }
