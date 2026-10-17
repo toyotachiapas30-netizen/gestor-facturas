@@ -141,6 +141,11 @@ async function loadAll() {
     try { lsCamp    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { lsCamp = {}; }
 
     const cloudResponse = await fetch(`${API}/state`, { credentials: 'same-origin' }).catch(() => null);
+    if (cloudResponse && cloudResponse.status === 401) {
+      document.cookie = 'takata_role=; Path=/; Max-Age=0';
+      window.location.replace('login.html');
+      return;
+    }
     if (cloudResponse && cloudResponse.ok) {
       const cloudState = await cloudResponse.json();
       localEdits   = { ...lsEdits,   ...(cloudState.edits   || {}) };
@@ -217,7 +222,7 @@ async function loadAll() {
     console.error('[Takata] Error crítico:', err);
     setStatus('⚠ Error de red', true);
     qs('#campaigns-body').innerHTML = `<tr><td colspan="15" style="text-align:center;padding:20px;color:#f88">
-      Error al cargar datos: ${err.message}. <a href="/takata/" style="color:#fff;text-decoration:underline">Reintentar</a></td></tr>`;
+      Error al cargar datos: ${err.message}. <a href="./" style="color:#fff;text-decoration:underline">Reintentar</a></td></tr>`;
   }
 }
 

@@ -12,6 +12,31 @@ function sb() {
   return _sb;
 }
 
+const TAKATA_SESSION_TOKEN  = 'takata_2026_toyota_secure_session';
+const TAKATA_READONLY_TOKEN = 'takata_readonly_session_token';
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/takata/login
+// ══════════════════════════════════════════════════════════════
+router.post('/login', (req, res) => {
+  const { usuario, clave } = req.body || {};
+  if (usuario === 'takata' && clave === 'toyota2026') {
+    res.setHeader('Set-Cookie', [
+      `takata_session=${TAKATA_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
+      `takata_role=admin; Path=/; SameSite=Lax; Max-Age=604800`
+    ]);
+    return res.json({ ok: true, role: 'admin' });
+  }
+  if (usuario === 'visor' && clave === 'toyota2026') {
+    res.setHeader('Set-Cookie', [
+      `takata_session=${TAKATA_READONLY_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
+      `takata_role=readonly; Path=/; SameSite=Lax; Max-Age=604800`
+    ]);
+    return res.json({ ok: true, role: 'readonly' });
+  }
+  return res.status(401).json({ error: 'Credenciales inválidas' });
+});
+
 // ══════════════════════════════════════════════════════════════
 // GET /api/takata/state
 // Devuelve todo el estado persistido en la nube de una sola vez

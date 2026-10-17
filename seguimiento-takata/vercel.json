@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/api/takata/:path*", "destination": "/api/takata?path=:path*" },
+    { "source": "/takata/login", "destination": "/api/takata?path=login" },
+    { "source": "/takata", "destination": "/index.html" },
+    { "source": "/takata/", "destination": "/index.html" },
+    { "source": "/takata/:path*", "destination": "/:path*" }
+  ]
+}
