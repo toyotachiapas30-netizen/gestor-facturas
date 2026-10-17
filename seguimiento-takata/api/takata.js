@@ -3,6 +3,93 @@
 const TAKATA_SESSION_TOKEN  = 'takata_2026_toyota_secure_session';
 const TAKATA_READONLY_TOKEN = 'takata_readonly_session_token';
 
+// Base de datos central de DO / admin.toyoter.com (Lista de Asociados y Permisos KPIs)
+const DO_SUPABASE_URL = 'https://ihwucfdwjnguwjxncwdw.supabase.co';
+const DO_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlod3VjZmR3am5ndXdqeG5jd2R3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NzY4MzQsImV4cCI6MjA5NTA1MjgzNH0.A2ND8DKBDGQ6ymhUDs_x6qZtcStoUDyk_0akG2hVD7Q';
+
+function normalizeEmp(val) {
+  return String(val || '').replace(/^EMP-/i, '').trim().toUpperCase();
+}
+
+function isGenericName(name) {
+  if (!name) return true;
+  const clean = String(name).trim();
+  if (!clean) return true;
+  return /^(asociado(\s+toyota)?|colaborador|empleado|usuario|sin\s+nombre)\b/i.test(clean);
+}
+
+async function resolveAssociateFromAdminToyoter(empInput) {
+  const target = normalizeEmp(empInput);
+  if (!target) return null;
+
+  const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=in.(__KPI_USERS_seguimiento-takata__,__DO_SYSTEM_USERS__,__DO_ASSOCIATES_DIRECTORY__)&fecha_cita=eq.2099-12-31&select=folio,datos_recepcion`;
+  const r = await fetch(url, {
+    headers: {
+      apikey: DO_SUPABASE_KEY,
+      Authorization: `Bearer ${DO_SUPABASE_KEY}`,
+      'Cache-Control': 'no-cache'
+    }
+  });
+  if (!r.ok) return null;
+  const rows = await r.json();
+  if (!Array.isArray(rows)) return null;
+
+  const assocMap = new Map();
+  const dirRow = rows.find(x => x.folio === '__DO_ASSOCIATES_DIRECTORY__');
+  if (Array.isArray(dirRow?.datos_recepcion?.associates)) {
+    for (const a of dirRow.datos_recepcion.associates) {
+      const emp = normalizeEmp(a.numEmpleado || a.employeeNumber);
+      const nombre = String(a.nombreCompleto || a.fullName || a.nombre || '').trim();
+      if (emp && nombre && !isGenericName(nombre)) {
+        assocMap.set(emp, { fullName: nombre, puesto: a.puesto || '', sucursal: a.sucursal || '' });
+      }
+    }
+  }
+
+  const authorizedMap = new Map();
+
+  // 1. Usuarios de sistema con permisos de admin o permisos-kpis
+  const sysRow = rows.find(x => x.folio === '__DO_SYSTEM_USERS__');
+  if (Array.isArray(sysRow?.datos_recepcion?.users)) {
+    for (const su of sysRow.datos_recepcion.users) {
+      const emp = normalizeEmp(su.numEmpleado || su.username);
+      if (!emp) continue;
+      const perms = Array.isArray(su.permissions) ? su.permissions : [];
+      const isAdmin = su.role === 'admin' || perms.includes('*');
+      if (isAdmin || perms.includes('permisos-kpis')) {
+        const dirInfo = assocMap.get(emp);
+        authorizedMap.set(emp, {
+          employeeNumber: emp,
+          fullName: (dirInfo && dirInfo.fullName) || su.nombre || `Asociado #${emp}`,
+          role: isAdmin ? 'admin' : 'staff',
+          canUploadExcel: isAdmin,
+          canEditTracking: true
+        });
+      }
+    }
+  }
+
+  // 2. Usuarios configurados explícitamente en admin.toyoter.com -> KPIs | Seguimientos -> Seguimiento Takata
+  const kpiRow = rows.find(x => x.folio === '__KPI_USERS_seguimiento-takata__');
+  if (Array.isArray(kpiRow?.datos_recepcion?.users)) {
+    for (const u of kpiRow.datos_recepcion.users) {
+      const emp = normalizeEmp(u.employeeNumber);
+      if (!emp) continue;
+      const dirInfo = assocMap.get(emp);
+      const bestName = (dirInfo && dirInfo.fullName) || (!isGenericName(u.fullName) ? u.fullName : `Asociado #${emp}`);
+      authorizedMap.set(emp, {
+        employeeNumber: emp,
+        fullName: bestName,
+        role: u.role || 'staff',
+        canUploadExcel: !!u.canUploadExcel,
+        canEditTracking: u.canEditTracking !== undefined ? !!u.canEditTracking : true
+      });
+    }
+  }
+
+  return authorizedMap.get(target) || null;
+}
+
 function getTakataToken(req) {
   const cookies = req.headers.cookie || '';
   const found = cookies.split(';').map(c => c.trim()).find(c => c.startsWith('takata_session='));
@@ -13,7 +100,7 @@ async function sbSelect(table) {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_KEY;
   const r = await fetch(`${url}/rest/v1/${table}?select=*`, {
-    headers: { apikey: key, Authorization: `Bearer ${key}` }
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Cache-Control': 'no-cache' }
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -51,24 +138,54 @@ module.exports = async (req, res) => {
       ? (Array.isArray(req.query.path) ? req.query.path.join('/') : String(req.query.path))
       : req.url.replace(/^\/api\/takata\/?/, '').replace(/^\/takata\/?/, '').split('?')[0];
 
-    // 1. Login
+    // 1. Login (por Número de Empleado sincronizado con admin.toyoter.com o credenciales clásicas)
     if (rawPath === 'login' && req.method === 'POST') {
-      const { usuario, clave } = req.body || {};
-      if (usuario === 'takata' && clave === 'toyota2026') {
+      const { numEmpleado, usuario, clave } = req.body || {};
+      const empCandidate = (numEmpleado || usuario || '').trim();
+
+      // A) Credenciales clásicas directas
+      if (empCandidate.toLowerCase() === 'takata' && clave === 'toyota2026') {
+        const userObj = { employeeNumber: 'ADMIN', fullName: 'Administrador Takata', role: 'admin', canUploadExcel: true, canEditTracking: true };
         res.setHeader('Set-Cookie', [
           `takata_session=${TAKATA_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
           `takata_role=admin; Path=/; SameSite=Lax; Max-Age=604800`
         ]);
-        return res.status(200).json({ ok: true, role: 'admin' });
+        return res.status(200).json({ ok: true, role: 'admin', user: userObj });
       }
-      if (usuario === 'visor' && clave === 'toyota2026') {
+      if (empCandidate.toLowerCase() === 'visor' && clave === 'toyota2026') {
+        const userObj = { employeeNumber: 'VISOR', fullName: 'Visor (Solo Lectura)', role: 'supervisor', canUploadExcel: false, canEditTracking: false };
         res.setHeader('Set-Cookie', [
           `takata_session=${TAKATA_READONLY_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
           `takata_role=readonly; Path=/; SameSite=Lax; Max-Age=604800`
         ]);
-        return res.status(200).json({ ok: true, role: 'readonly' });
+        return res.status(200).json({ ok: true, role: 'readonly', user: userObj });
       }
-      return res.status(401).json({ error: 'Credenciales inválidas' });
+
+      // B) Acceso por Número de Empleado desde admin.toyoter.com (KPIs | Seguimientos -> Seguimiento Takata)
+      if (empCandidate) {
+        const assocUser = await resolveAssociateFromAdminToyoter(empCandidate);
+        if (assocUser) {
+          const isReadOnlyUser = !assocUser.canEditTracking;
+          const tokenToSet = isReadOnlyUser ? TAKATA_READONLY_TOKEN : TAKATA_SESSION_TOKEN;
+          const roleToSet  = isReadOnlyUser ? 'readonly' : 'admin';
+          res.setHeader('Set-Cookie', [
+            `takata_session=${tokenToSet}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
+            `takata_role=${roleToSet}; Path=/; SameSite=Lax; Max-Age=604800`
+          ]);
+          return res.status(200).json({ ok: true, role: roleToSet, user: assocUser });
+        }
+      }
+
+      return res.status(401).json({ error: 'Número de empleado sin acceso autorizado en admin.toyoter.com (KPIs | Seguimientos).' });
+    }
+
+    // 1b. Logout
+    if (rawPath === 'logout' && req.method === 'POST') {
+      res.setHeader('Set-Cookie', [
+        'takata_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+        'takata_role=; Path=/; SameSite=Lax; Max-Age=0'
+      ]);
+      return res.status(200).json({ ok: true });
     }
 
     // 2. Autenticación
@@ -80,23 +197,54 @@ module.exports = async (req, res) => {
       return res.status(403).json({ error: 'Usuario de solo lectura. No tienes permisos para modificar.' });
     }
 
-    // 3. GET /state
+    // 3. GET /state (incluye validación en vivo de permisos del empleado si envía ?emp=...)
     if (rawPath === 'state' && req.method === 'GET') {
-      const [edits, proceso, custom, camp] = await Promise.all([
+      const empParam = req.query?.emp ? String(req.query.emp).trim() : '';
+      const tasks = [
         sbSelect('takata_edits'),
         sbSelect('takata_proceso_edits'),
         sbSelect('takata_custom_vins'),
         sbSelect('takata_camp_edits'),
-      ]);
+      ];
+      if (empParam && empParam !== 'ADMIN' && empParam !== 'VISOR') {
+        tasks.push(resolveAssociateFromAdminToyoter(empParam).catch(() => undefined));
+      }
+
+      const [edits, proceso, custom, camp, liveUser] = await Promise.all(tasks);
       const editsMap   = Object.fromEntries((edits   || []).map(r => [r.vin, r]));
       const procesoMap = Object.fromEntries((proceso || []).map(r => [r.vin, r]));
       const campMap    = Object.fromEntries((camp    || []).map(r => [r.id, r.valor]));
 
+      // Si el empleado fue revocado en admin.toyoter.com, notificar inmediatamente
+      if (empParam && empParam !== 'ADMIN' && empParam !== 'VISOR' && liveUser === null) {
+        res.setHeader('Set-Cookie', [
+          'takata_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+          'takata_role=; Path=/; SameSite=Lax; Max-Age=0'
+        ]);
+        return res.status(401).json({ error: 'Acceso revocado desde admin.toyoter.com', revoked: true });
+      }
+
+      // Si cambiaron sus permisos de edición en admin.toyoter.com, actualizar cookie en vivo
+      if (liveUser) {
+        const isRO = !liveUser.canEditTracking;
+        const newTok = isRO ? TAKATA_READONLY_TOKEN : TAKATA_SESSION_TOKEN;
+        const newRole = isRO ? 'readonly' : 'admin';
+        if (token !== newTok) {
+          res.setHeader('Set-Cookie', [
+            `takata_session=${newTok}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
+            `takata_role=${newRole}; Path=/; SameSite=Lax; Max-Age=604800`
+          ]);
+        }
+      }
+
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       return res.status(200).json({
-        edits:      editsMap,
-        proceso:    procesoMap,
-        customVins: custom || [],
-        camp:       campMap,
+        edits:       editsMap,
+        proceso:     procesoMap,
+        customVins:  custom || [],
+        camp:        campMap,
+        currentUser: liveUser || undefined,
+        serverTime:  new Date().toISOString()
       });
     }
 

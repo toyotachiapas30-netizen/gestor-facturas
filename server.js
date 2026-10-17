@@ -121,7 +121,7 @@ app.post('/takata/login', (req, res) => {
 app.use('/takata', takataAuth, express.static(path.join(__dirname, 'seguimiento-takata')));
 
 function takataApiAuth(req, res, next) {
-  if (req.path === '/login') return next();
+  if (req.path === '/login' || req.path === '/logout') return next();
   const token = getTakataToken(req);
   if (!token || (token !== TAKATA_SESSION_TOKEN && token !== TAKATA_READONLY_TOKEN)) {
     return res.status(401).json({ error: 'No autorizado. Inicia sesión en /takata/' });

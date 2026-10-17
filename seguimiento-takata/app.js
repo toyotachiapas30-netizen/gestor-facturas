@@ -1,13 +1,44 @@
 'use strict';
 
 /* ── globals ── */
-let vinData = [], kpisData = {}, procesoData = [];
+let vinData = [], kpisData = {}, procesoData = [], procesoBaseData = [];
 let localEdits = {};
 let filtered = [], currentPage = 1, pageSize = 50;
 let sortCol = null, sortDir = 'asc';
 
-// Detectar si el usuario actual es de solo lectura
-const isReadOnly = document.cookie.includes('takata_role=readonly');
+let currentUser = null;
+try {
+  currentUser = JSON.parse(localStorage.getItem('takata_current_user') || 'null');
+} catch (_) {
+  currentUser = null;
+}
+
+// Detectar si el usuario actual es de solo lectura o tiene permiso de gestionar VINs
+let isReadOnly = document.cookie.includes('takata_role=readonly') || (currentUser ? currentUser.canEditTracking === false : false);
+let canManageVins = !isReadOnly && (!currentUser || currentUser.canUploadExcel !== false || currentUser.role === 'admin');
+
+function getDefaultAgentName() {
+  if (!currentUser || !currentUser.fullName) return '';
+  const n = String(currentUser.fullName).trim();
+  if (!n || n.toLowerCase().includes('administrador') || n.toLowerCase().includes('visor')) return '';
+  return n.split(/\s+/)[0].toUpperCase();
+}
+
+function updateUserSessionUI() {
+  const badge = qs('#user-session-badge');
+  if (badge && currentUser && currentUser.fullName) {
+    const empTag = currentUser.employeeNumber && currentUser.employeeNumber !== 'ADMIN' && currentUser.employeeNumber !== 'VISOR'
+      ? ` (#${currentUser.employeeNumber})`
+      : '';
+    const modeTag = isReadOnly ? '👁️ Solo Lectura' : '✏️ Edición Activa';
+    badge.textContent = `👤 ${currentUser.fullName}${empTag} · ${modeTag}`;
+    badge.style.display = 'inline-flex';
+  }
+  const btnNuevoVin = qs('#btn-nuevo-vin');
+  if (btnNuevoVin) {
+    btnNuevoVin.style.display = (isReadOnly || !canManageVins) ? 'none' : '';
+  }
+}
 
 const qs  = (s, c=document) => c.querySelector(s);
 const qsa = (s, c=document) => [...c.querySelectorAll(s)];
@@ -32,15 +63,32 @@ function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 function pct(n,t){ return t ? (n/t*100).toFixed(1)+'%' : '0%'; }
 
 /* ══════════════════════════════════════════
-   CLOUD STORAGE (Supabase via API)
-   Con fallback a localStorage si el servidor no responde
+   CLOUD STORAGE & REAL-TIME SYNC (Supabase via API)
 ══════════════════════════════════════════ */
 const API = '/api/takata';
 let customVins = [];
 let procesoEdits = {};
+let lastLocalWriteAt = 0;
+let lastStateHash = '';
+let pendingRealtimeRender = false;
+
+const realtimeChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('takata_realtime_sync') : null;
+if (realtimeChannel) {
+  realtimeChannel.onmessage = () => {
+    pollRealtimeCloud(true);
+  };
+}
+
+function notifyRealtimePeers() {
+  lastLocalWriteAt = Date.now();
+  if (realtimeChannel) {
+    try { realtimeChannel.postMessage({ type: 'SYNC', ts: lastLocalWriteAt }); } catch (_) {}
+  }
+}
 
 async function cloudPost(endpoint, body) {
   try {
+    lastLocalWriteAt = Date.now();
     const r = await fetch(`${API}/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -48,6 +96,7 @@ async function cloudPost(endpoint, body) {
       body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error(await r.text());
+    notifyRealtimePeers();
     return true;
   } catch (err) {
     console.warn(`[Takata Cloud] Error en /${endpoint}:`, err.message);
@@ -61,10 +110,8 @@ function merge(r){ const e=localEdits[r.vin]; return e ? {...r,...e} : {...r}; }
 async function saveEdit(vin) {
   const e = localEdits[vin] || {};
   const ok = await cloudPost('edit', { vin, ...e });
-  if (!ok) {
-    // fallback: keep local copy
-    localStorage.setItem('takata_edits_v2', JSON.stringify(localEdits));
-  }
+  try { localStorage.setItem('takata_edits_v2', JSON.stringify(localEdits)); } catch (_) {}
+  return ok;
 }
 
 /* Persistencia de proceso */
@@ -72,7 +119,6 @@ async function saveProcesoEntry(vin) {
   const entry = procesoEdits[vin];
   if (!entry) return;
   
-  // Extraer solo los campos que existen en la tabla de la nube (evitar schema errors)
   const payload = {
     vin: entry.vin,
     proceso: entry.proceso,
@@ -85,85 +131,202 @@ async function saveProcesoEntry(vin) {
   };
 
   const ok = await cloudPost('proceso', payload);
-  if (!ok) {
-    localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits));
-  }
+  try { localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits)); } catch (_) {}
+  return ok;
 }
 
 async function saveProcesoEdits() {
-  // llamado cuando se guarda un entry individual, ya delegamos a saveProcesoEntry
-  // esta funcion se mantiene por compatibilidad con el codigo existente
+  try { localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits)); } catch (_) {}
 }
 
 /* Persistencia de VINs customizados */
 async function saveCustomVin(nuevo) {
   const ok = await cloudPost('custom-vin', nuevo);
-  if (!ok) {
-    localStorage.setItem('takata_custom_vins_v1', JSON.stringify(customVins));
-  }
+  try { localStorage.setItem('takata_custom_vins_v1', JSON.stringify(customVins)); } catch (_) {}
+  return ok;
 }
 
 /* Persistencia de reclamos de campana */
 let campEdits = {};
 async function saveCampEntry(mes, dealer, camp, valor) {
-  const ok = await cloudPost('camp', { mes, dealer, camp, valor });
   const key = `${mes}|${dealer}|${camp}`;
-  if (!ok) {
-    localStorage.setItem('takata_camp_edits_v1', JSON.stringify(campEdits));
-  }
   campEdits[key] = valor;
+  const ok = await cloudPost('camp', { mes, dealer, camp, valor });
+  try { localStorage.setItem('takata_camp_edits_v1', JSON.stringify(campEdits)); } catch (_) {}
+  return ok;
 }
 
 /* ══════════════════════════════════════════
-   LOAD DATA
+   LOAD DATA & REAL-TIME MULTI-USER POLLING
 ══════════════════════════════════════════ */
-let vinDataLoaded = false; // bandera: ¿ya se cargaron los VINs?
+let vinDataLoaded = false;
+let baseVinsCatalog = [];
 
-/* ── LOGS DE PROGRESO ── */
 function setStatus(msg, isError = false) {
   const b = qs('#last-updated-badge');
   if (b) {
     b.textContent = msg;
-    b.style.background = isError ? '#c00' : 'rgba(255,255,255,0.1)';
-    b.style.color = isError ? '#fff' : 'rgba(255,255,255,0.7)';
+    b.style.background = isError ? '#c00' : 'rgba(29,185,84,0.16)';
+    b.style.border = isError ? '1px solid #f44' : '1px solid rgba(29,185,84,0.4)';
+    b.style.color = isError ? '#fff' : '#7ef2a6';
   }
+}
+
+function rebuildProcesoData() {
+  const list = procesoBaseData
+    .filter(r => {
+      if (procesoEdits[r.vin]) return true;
+      const le = localEdits[r.vin];
+      if (le && le.contactado === 'NO CONTACTADO' && !le.cita) return false;
+      return true;
+    })
+    .map(r => ({ ...r }));
+
+  Object.values(procesoEdits).forEach(pe => {
+    const idx = list.findIndex(r => r.vin === pe.vin);
+    if (idx >= 0) {
+      const prevCliente = list[idx].cliente;
+      Object.assign(list[idx], pe);
+      if (!list[idx].cliente && prevCliente) list[idx].cliente = prevCliente;
+    } else {
+      list.unshift({ ...pe });
+    }
+  });
+
+  if (vinDataLoaded && vinData.length) {
+    list.forEach(rp => {
+      const base = vinData.find(rv => rv.vin === rp.vin);
+      if (base) {
+        const mergedBase = merge(base);
+        if (!rp.cliente) rp.cliente = mergedBase.cliente;
+        if (!rp.dealer) rp.dealer = mergedBase.dealer;
+        if (!rp.acciones) rp.acciones = mergedBase.acciones;
+      }
+    });
+  }
+
+  procesoData = list;
+}
+
+function computeStateFingerprint(stateObj) {
+  return JSON.stringify({
+    e: stateObj.edits || {},
+    p: stateObj.proceso || {},
+    v: stateObj.customVins || [],
+    c: stateObj.camp || {},
+    ro: isReadOnly,
+    mv: canManageVins
+  });
+}
+
+function isUserCurrentlyEditingDOM() {
+  const ae = document.activeElement;
+  if (ae && (ae.isContentEditable || ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA')) {
+    // Permitir refrescar si solo está enfocado el buscador general sin escribir en tabla
+    if (ae.id !== 'search-input' && ae.id !== 'filter-proceso' && ae.id !== 'filter-agente' && ae.id !== 'month-select') {
+      return true;
+    }
+  }
+  const openDrop = qsa('.actions-dropdown').some(d => d.style.display === 'block');
+  const modalOpen = qs('#modal-overlay')?.style.display === 'flex' || qs('#modal-nuevo-overlay')?.style.display === 'flex';
+  return openDrop || modalOpen;
+}
+
+function applyRealtimeRender() {
+  pendingRealtimeRender = false;
+  updateUserSessionUI();
+  rebuildProcesoData();
+  if (vinDataLoaded && baseVinsCatalog.length) {
+    vinData = [...customVins, ...baseVinsCatalog];
+  }
+  const monthSel = qs('#month-select');
+  if (monthSel && monthSel.value) renderCampaignsTable(monthSel.value);
+  renderProceso();
+  if (matrizInited && vinDataLoaded) applyFilters();
+  setStatus('🟢 En tiempo real · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' }));
+}
+
+async function pollRealtimeCloud(force = false) {
+  if (!force && document.visibilityState === 'hidden') return;
+  if (!force && Date.now() - lastLocalWriteAt < 2000) return;
+
+  try {
+    const empParam = currentUser?.employeeNumber ? `?emp=${encodeURIComponent(currentUser.employeeNumber)}` : '';
+    const r = await fetch(`${API}/state${empParam}`, { credentials: 'same-origin', cache: 'no-store' });
+    if (r.status === 401) {
+      document.cookie = 'takata_role=; Path=/; Max-Age=0';
+      localStorage.removeItem('takata_current_user');
+      window.location.replace('login.html');
+      return;
+    }
+    if (!r.ok) return;
+
+    const cloudState = await r.json();
+
+    if (cloudState.currentUser) {
+      currentUser = cloudState.currentUser;
+      isReadOnly = !currentUser.canEditTracking;
+      canManageVins = !isReadOnly && (!!currentUser.canUploadExcel || currentUser.role === 'admin');
+      try { localStorage.setItem('takata_current_user', JSON.stringify(currentUser)); } catch (_) {}
+    }
+
+    const newHash = computeStateFingerprint(cloudState);
+    if (newHash === lastStateHash) return;
+    lastStateHash = newHash;
+
+    localEdits   = cloudState.edits      || {};
+    procesoEdits = cloudState.proceso    || {};
+    customVins   = cloudState.customVins || [];
+    campEdits    = cloudState.camp       || {};
+
+    try {
+      localStorage.setItem('takata_edits_v2', JSON.stringify(localEdits));
+      localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits));
+      localStorage.setItem('takata_custom_vins_v1', JSON.stringify(customVins));
+      localStorage.setItem('takata_camp_edits_v1', JSON.stringify(campEdits));
+    } catch (_) {}
+
+    if (isUserCurrentlyEditingDOM()) {
+      pendingRealtimeRender = true;
+    } else {
+      applyRealtimeRender();
+    }
+  } catch (_) {}
 }
 
 async function loadAll() {
   try {
     setStatus('Conectando...');
+    updateUserSessionUI();
 
-    // 1. Cargar estado de la nube (rápido) y respaldar/sincronizar con localStorage
     let lsEdits = {}, lsProceso = {}, lsCustom = [], lsCamp = {};
     try { lsEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')        || '{}'); } catch { lsEdits = {}; }
     try { lsProceso = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { lsProceso = {}; }
     try { lsCustom  = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { lsCustom = []; }
     try { lsCamp    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { lsCamp = {}; }
 
-    const cloudResponse = await fetch(`${API}/state`, { credentials: 'same-origin' }).catch(() => null);
+    const empParam = currentUser?.employeeNumber ? `?emp=${encodeURIComponent(currentUser.employeeNumber)}` : '';
+    const cloudResponse = await fetch(`${API}/state${empParam}`, { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
     if (cloudResponse && cloudResponse.status === 401) {
       document.cookie = 'takata_role=; Path=/; Max-Age=0';
+      localStorage.removeItem('takata_current_user');
       window.location.replace('login.html');
       return;
     }
     if (cloudResponse && cloudResponse.ok) {
       const cloudState = await cloudResponse.json();
-      localEdits   = { ...lsEdits,   ...(cloudState.edits   || {}) };
-      procesoEdits = { ...lsProceso, ...(cloudState.proceso || {}) };
-      customVins   = cloudState.customVins || lsCustom || [];
-      campEdits    = { ...lsCamp,    ...(cloudState.camp    || {}) };
-
-      // Si había cambios guardados localmente mientras estuvo offline, subirlos a Supabase
-      if (!isReadOnly) {
-        Object.keys(lsEdits).forEach(vin => {
-          if (!cloudState.edits?.[vin]) saveEdit(vin);
-        });
-        Object.keys(lsProceso).forEach(vin => {
-          if (!cloudState.proceso?.[vin]) saveProcesoEntry(vin);
-        });
+      if (cloudState.currentUser) {
+        currentUser = cloudState.currentUser;
+        isReadOnly = !currentUser.canEditTracking;
+        canManageVins = !isReadOnly && (!!currentUser.canUploadExcel || currentUser.role === 'admin');
+        try { localStorage.setItem('takata_current_user', JSON.stringify(currentUser)); } catch (_) {}
       }
+      localEdits   = cloudState.edits      || {};
+      procesoEdits = cloudState.proceso    || {};
+      customVins   = cloudState.customVins || [];
+      campEdits    = cloudState.camp       || {};
+      lastStateHash = computeStateFingerprint(cloudState);
 
-      // Actualizar caché local con el estado completo de la nube
       try {
         localStorage.setItem('takata_edits_v2', JSON.stringify(localEdits));
         localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits));
@@ -171,7 +334,7 @@ async function loadAll() {
         localStorage.setItem('takata_camp_edits_v1', JSON.stringify(campEdits));
       } catch (e) {}
 
-      console.log('☁️ Estado cargado desde Supabase');
+      console.log('☁️ Estado cargado desde Supabase en tiempo real');
     } else {
       console.warn('💾 Usando datos locales (offline)');
       localEdits   = lsEdits;
@@ -180,10 +343,7 @@ async function loadAll() {
       campEdits    = lsCamp;
     }
 
-    if (isReadOnly) {
-      const btnNuevoVin = qs('#btn-nuevo-vin');
-      if (btnNuevoVin) btnNuevoVin.style.display = 'none';
-    }
+    updateUserSessionUI();
 
     // 2. Cargar KPIs (rápido)
     setStatus('Cargando KPIs...');
@@ -195,28 +355,34 @@ async function loadAll() {
     setStatus('Cargando proceso...');
     const pRes = await fetch('vins_proceso.json', { credentials: 'same-origin' });
     if (!pRes.ok) throw new Error('No se pudo cargar vins_proceso.json');
-    procesoData = await pRes.json();
+    procesoBaseData = await pRes.json();
 
     // 4. Procesar datos de proceso
-    Object.values(procesoEdits).forEach(pe => {
-      const idx = procesoData.findIndex(r => r.vin === pe.vin);
-      if (idx >= 0) {
-        const prevCliente = procesoData[idx].cliente;
-        Object.assign(procesoData[idx], pe);
-        if (!procesoData[idx].cliente && prevCliente) procesoData[idx].cliente = prevCliente;
-      } else {
-        procesoData.unshift(pe);
-      }
-    });
+    rebuildProcesoData();
 
     // 5. Inicializar UI principal
     initKpis();
     initProceso();
     
-    setStatus('Actualizado: ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' }));
+    setStatus('🟢 En tiempo real · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' }));
 
     // 6. Cargar VINs en segundo plano (Pesado: 3MB)
     loadVinsBackground();
+
+    // 7. Iniciar sincronización multiusuario en tiempo real cada 4 segundos
+    setInterval(() => pollRealtimeCloud(false), 4000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') pollRealtimeCloud(true);
+    });
+    document.addEventListener('focusout', () => {
+      if (pendingRealtimeRender) {
+        setTimeout(() => {
+          if (pendingRealtimeRender && !isUserCurrentlyEditingDOM()) {
+            applyRealtimeRender();
+          }
+        }, 150);
+      }
+    });
 
   } catch (err) {
     console.error('[Takata] Error crítico:', err);
@@ -231,26 +397,17 @@ async function loadVinsBackground() {
     const r = await fetch('takata_vins.json', { credentials: 'same-origin' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const v = await r.json();
+    baseVinsCatalog = v;
     vinData = [...customVins, ...v];
     vinDataLoaded = true;
 
-    // Auto-fill nombres, dealer y acciones desde la base de datos principal
-    procesoData.forEach(rp => {
-      const base = vinData.find(rv => rv.vin === rp.vin);
-      if (base) {
-        const mergedBase = merge(base); // Aplica localEdits (como dealer)
-        if (!rp.cliente) rp.cliente = mergedBase.cliente;
-        if (!rp.dealer) rp.dealer = mergedBase.dealer;
-        if (!rp.acciones) rp.acciones = mergedBase.acciones;
-      }
-    });
+    rebuildProcesoData();
 
     if (qs('#tab-matriz').classList.contains('active')) {
       initMatriz();
       qs('#tab-btn-matriz')?.classList.add('vins-ready');
     }
     
-    // Forzar re-render de la tabla de proceso para mostrar los nombres recién cargados
     renderProceso();
     
     console.log(`✅ [Takata] ${vinData.length} VINs cargados en segundo plano`);
@@ -576,7 +733,7 @@ function renderProceso() {
       <td><span class="${isReadOnly ? '' : 'editable-cell'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="agente" style="background:var(--bg-input);border-radius:4px;padding:2px 8px;font-size:.75rem;display:inline-block;min-width:60px">${esc(r.agente)}</span></td>
       <td class="muted" style="min-width:200px;max-width:350px;line-height:1.3"><div class="${isReadOnly ? '' : 'editable-cell'}" ${isReadOnly ? '' : 'contenteditable="true"'} data-vin="${esc(r.vin)}" data-field="comentario" style="min-width:100%;min-height:1em;word-wrap:break-word">${esc(r.comentario)||''}</div></td>
       <td>
-        ${isReadOnly ? '' : `
+        ${(isReadOnly || !canManageVins) ? '' : `
         <button class="btn-delete-proceso" data-vin="${esc(r.vin)}" title="Eliminar de Proceso" style="background:transparent; border:none; color:var(--red); cursor:pointer; font-size:1.1rem; padding:4px; opacity:0.6; transition:opacity 0.2s;">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
         </button>
@@ -656,7 +813,7 @@ async function deleteProcesoEntry(vin) {
   // Regresar a la base de datos como NO CONTACTADO
   localEdits[vin] = { ...(localEdits[vin] || {}), contactado: 'NO CONTACTADO', cita: '', observacion: '' };
   saveEdit(vin);
-  applyFilters(); // Refrescar la tabla base de datos
+  if (matrizInited && vinDataLoaded) applyFilters(); // Refrescar la tabla base de datos
   
   // 2. Guardar en localStorage
   saveProcesoEdits();
@@ -666,11 +823,14 @@ async function deleteProcesoEntry(vin) {
   
   // 4. Borrar de la BD (Supabase)
   try {
+    lastLocalWriteAt = Date.now();
     const res = await fetch(`/api/takata/proceso/${vin}`, {
       method: 'DELETE',
-      headers: { 'Accept': 'application/json' }
+      headers: { 'Accept': 'application/json' },
+      credentials: 'include'
     });
     if (!res.ok) throw new Error('Error al borrar en BD');
+    notifyRealtimePeers();
     toast('✔ VIN eliminado de Proceso');
   } catch(e) {
     console.error('Error deleteProcesoEntry:', e);
@@ -969,7 +1129,7 @@ function syncToProceso(vin, citaRaw, obs) {
     actualizacion: new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'}),
     unidad:      `${merged.descripcion||''} ${merged.modelo||''}`.trim(),
     acciones:    merged.acciones || '23TA15',
-    agente:      merged.agente   || '',
+    agente:      merged.agente   || existing?.agente || getDefaultAgentName() || '',
     comentario:  obs || merged.observacion || '',
   };
 
@@ -1048,13 +1208,11 @@ function openModal(vin) {
   const citaVal = localEdits[r.vin]?.cita ?? '';
   qs('#modal-cita-input').value = citaVal;
   
-  if (isReadOnly) {
-    qs('#modal-contacto-select').disabled = true;
-    qs('#modal-dealer-select').disabled = true;
-    qs('#modal-obs-input').disabled = true;
-    qs('#modal-cita-input').disabled = true;
-    qs('#modal-save').style.display = 'none';
-  }
+  qs('#modal-contacto-select').disabled = isReadOnly;
+  qs('#modal-dealer-select').disabled = isReadOnly;
+  qs('#modal-obs-input').disabled = isReadOnly;
+  qs('#modal-cita-input').disabled = isReadOnly;
+  qs('#modal-save').style.display = isReadOnly ? 'none' : '';
   
   qs('#modal-overlay').style.display='flex';
 }
@@ -1101,7 +1259,7 @@ function saveModal(){
       actualizacion: new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'}),
       unidad:      `${merged.descripcion||''} ${merged.modelo||''}`.trim(),
       acciones:    merged.acciones || '23TA15',
-      agente:      merged.agente   || '',
+      agente:      merged.agente   || existing?.agente || getDefaultAgentName() || '',
       comentario:  merged.observacion || '',
     };
 
@@ -1162,6 +1320,16 @@ function initTabs() {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     initTabs();
+
+    const btnLogout = qs('#btn-logout-takata');
+    if (btnLogout) {
+      btnLogout.addEventListener('click', async () => {
+        try { await fetch('/api/takata/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
+        document.cookie = 'takata_role=; path=/; max-age=0; SameSite=Lax';
+        try { localStorage.removeItem('takata_current_user'); } catch (e) {}
+        window.location.replace('login.html');
+      });
+    }
     
     // modal bindings
     const mClose = qs('#modal-close'), mOverlay = qs('#modal-overlay'), mSave = qs('#modal-save');
@@ -1172,11 +1340,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Nuevo VIN
     const btnNuevo = qs('#btn-nuevo-vin'), modalNuevo = qs('#modal-nuevo-overlay'), formNuevo = qs('#form-nuevo-vin');
     if (btnNuevo && modalNuevo && formNuevo) {
-      btnNuevo.addEventListener('click', () => modalNuevo.style.display = 'flex');
+      btnNuevo.addEventListener('click', () => {
+        if (isReadOnly || !canManageVins) return toast('🔒 No tienes permiso para registrar VINs', 'error');
+        modalNuevo.style.display = 'flex';
+      });
       qs('#modal-nuevo-close')?.addEventListener('click', () => modalNuevo.style.display = 'none');
       modalNuevo.addEventListener('click', e => { if(e.target === modalNuevo) modalNuevo.style.display = 'none'; });
       formNuevo.addEventListener('submit', async e => {
         e.preventDefault();
+        if (isReadOnly || !canManageVins) return;
         const nuevo = Object.fromEntries(new FormData(formNuevo).entries());
         if (vinData.some(r => r.vin === nuevo.vin)) return toast('Error: VIN duplicado', 'error');
         await saveCustomVin(nuevo);

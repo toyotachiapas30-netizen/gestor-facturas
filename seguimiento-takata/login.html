@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Acceso – Takata Toyota Chiapas</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <title>Acceso – Seguimiento Takata | Toyota Chiapas</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -17,15 +17,15 @@
       justify-content: center;
       position: relative;
       overflow: hidden;
+      padding: 1.5rem;
     }
 
-    /* Decoración de fondo */
     body::before {
       content: '';
       position: absolute;
       width: 600px; height: 600px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(235,0,27,0.08) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(235,0,27,0.10) 0%, transparent 70%);
       top: -100px; left: -150px;
       pointer-events: none;
     }
@@ -34,20 +34,20 @@
       position: absolute;
       width: 500px; height: 500px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(0,80,200,0.06) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(0,80,200,0.08) 0%, transparent 70%);
       bottom: -100px; right: -100px;
       pointer-events: none;
     }
 
     .card {
-      background: rgba(255,255,255,0.04);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 20px;
-      padding: 48px 40px;
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(22px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px;
+      padding: 44px 38px;
       width: 100%;
-      max-width: 420px;
-      box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+      max-width: 430px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.55);
       position: relative;
       z-index: 1;
     }
@@ -57,11 +57,11 @@
       align-items: center;
       justify-content: center;
       gap: 12px;
-      margin-bottom: 32px;
+      margin-bottom: 26px;
     }
 
     .logo-section img {
-      height: 44px;
+      height: 46px;
       filter: drop-shadow(0 2px 8px rgba(235,0,27,0.4));
     }
 
@@ -72,31 +72,36 @@
 
     .brand-name {
       font-size: 16px;
-      font-weight: 700;
+      font-weight: 800;
       color: #fff;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.04em;
     }
 
     .brand-sub {
       font-size: 11px;
-      color: rgba(255,255,255,0.45);
+      color: rgba(255,255,255,0.5);
       letter-spacing: 0.1em;
       text-transform: uppercase;
     }
 
     h1 {
-      font-size: 22px;
-      font-weight: 700;
+      font-size: 21px;
+      font-weight: 800;
       color: #fff;
       text-align: center;
       margin-bottom: 6px;
     }
 
+    h1 span {
+      color: #eb0a1e;
+    }
+
     .subtitle {
       text-align: center;
       font-size: 13px;
-      color: rgba(255,255,255,0.45);
-      margin-bottom: 32px;
+      color: rgba(255,255,255,0.55);
+      margin-bottom: 28px;
+      line-height: 1.4;
     }
 
     .field {
@@ -105,9 +110,9 @@
 
     label {
       display: block;
-      font-size: 12px;
-      font-weight: 600;
-      color: rgba(255,255,255,0.6);
+      font-size: 11.5px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.65);
       text-transform: uppercase;
       letter-spacing: 0.08em;
       margin-bottom: 8px;
@@ -116,21 +121,22 @@
     input {
       width: 100%;
       background: rgba(255,255,255,0.07);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 10px;
-      padding: 12px 16px;
+      border: 1.5px solid rgba(255,255,255,0.14);
+      border-radius: 12px;
+      padding: 13px 16px;
       font-size: 15px;
+      font-weight: 600;
       color: #fff;
       font-family: 'Inter', sans-serif;
       transition: border-color 0.2s, background 0.2s;
       outline: none;
     }
 
-    input::placeholder { color: rgba(255,255,255,0.25); }
+    input::placeholder { color: rgba(255,255,255,0.28); font-weight: 400; }
 
     input:focus {
-      border-color: rgba(235,0,27,0.6);
-      background: rgba(255,255,255,0.10);
+      border-color: #eb001b;
+      background: rgba(255,255,255,0.11);
     }
 
     .btn {
@@ -138,41 +144,54 @@
       padding: 14px;
       background: linear-gradient(135deg, #eb001b, #c40017);
       border: none;
-      border-radius: 10px;
+      border-radius: 12px;
       color: #fff;
       font-size: 15px;
-      font-weight: 600;
+      font-weight: 700;
       font-family: 'Inter', sans-serif;
       cursor: pointer;
-      margin-top: 10px;
+      margin-top: 6px;
       transition: opacity 0.2s, transform 0.1s;
       letter-spacing: 0.03em;
+      box-shadow: 0 8px 20px rgba(235,0,27,0.3);
     }
 
-    .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn:hover { opacity: 0.92; transform: translateY(-1px); }
     .btn:active { transform: translateY(0); }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
     .error-msg {
       background: rgba(235,0,27,0.15);
-      border: 1px solid rgba(235,0,27,0.3);
-      border-radius: 8px;
+      border: 1px solid rgba(235,0,27,0.35);
+      border-radius: 10px;
       padding: 10px 14px;
-      color: #ff6b7a;
+      color: #ff808c;
       font-size: 13px;
       text-align: center;
       margin-top: 14px;
       display: none;
+      line-height: 1.4;
     }
 
     .error-msg.visible { display: block; }
 
-    .footer-note {
+    .sync-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-size: 11.5px;
+      color: rgba(255,255,255,0.45);
+      margin-top: 24px;
       text-align: center;
-      font-size: 11px;
-      color: rgba(255,255,255,0.2);
-      margin-top: 28px;
-      letter-spacing: 0.05em;
+    }
+
+    .sync-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #1db954;
+      box-shadow: 0 0 8px #1db954;
     }
   </style>
 </head>
@@ -182,62 +201,88 @@
       <img src="logo-principal.png" alt="Toyota" onerror="this.style.display='none'">
       <div class="brand-text">
         <span class="brand-name">Toyota Chiapas</span>
-        <span class="brand-sub">Portal Interno</span>
+        <span class="brand-sub">Portal Toyoter</span>
       </div>
     </div>
 
-    <h1>Acceso Restringido</h1>
-    <p class="subtitle">SEGUIMIENTO DE ACCIÓN DE SERVICIO TAKATA</p>
+    <h1>Seguimiento <span>Takata</span></h1>
+    <p class="subtitle">Ingresa tu número de empleado autorizado en <strong>admin.toyoter.com</strong> para continuar</p>
 
     <form id="loginForm">
       <div class="field">
-        <label for="usuario">Usuario</label>
-        <input type="text" id="usuario" name="usuario" placeholder="Ingresa tu usuario" autocomplete="username" required>
+        <label for="numEmpleado">Número de Empleado</label>
+        <input type="text" id="numEmpleado" name="numEmpleado" placeholder="Ej. 9997" autocomplete="username" autofocus required>
       </div>
-      <div class="field">
+      <div class="field" id="passwordFieldWrap" style="display:none;">
         <label for="clave">Contraseña</label>
-        <input type="password" id="clave" name="clave" placeholder="••••••••" autocomplete="current-password" required>
+        <input type="password" id="clave" name="clave" placeholder="••••••••" autocomplete="current-password">
       </div>
-      <button type="submit" class="btn" id="loginBtn">Iniciar sesión</button>
-      <div class="error-msg" id="errorMsg">Usuario o contraseña incorrectos</div>
+      <button type="submit" class="btn" id="loginBtn">Ingresar al Portal</button>
+      <div class="error-msg" id="errorMsg">⚠️ Número de empleado no registrado o sin acceso en KPIs | Seguimientos.</div>
     </form>
 
-    <p class="footer-note">Acceso exclusivo para personal autorizado</p>
+    <div class="sync-badge">
+      <span class="sync-dot"></span>
+      <span>Sincronizado en tiempo real con admin.toyoter.com</span>
+    </div>
   </div>
 
   <script>
+    const numInput = document.getElementById('numEmpleado');
+    const passWrap = document.getElementById('passwordFieldWrap');
+    const passInput = document.getElementById('clave');
+
+    // Mostrar campo de contraseña sólo si escribe usuario legacy ('takata' o 'visor')
+    numInput.addEventListener('input', function() {
+      const v = numInput.value.trim().toLowerCase();
+      if (v === 'takata' || v === 'visor') {
+        passWrap.style.display = 'block';
+      } else {
+        passWrap.style.display = 'none';
+        passInput.value = '';
+      }
+    });
+
     document.getElementById('loginForm').addEventListener('submit', async function(e) {
       e.preventDefault();
       const btn = document.getElementById('loginBtn');
       const errMsg = document.getElementById('errorMsg');
-      const usuario = document.getElementById('usuario').value.trim();
-      const clave   = document.getElementById('clave').value;
+      const numEmpleado = numInput.value.trim();
+      const clave = passInput.value;
+
+      if (!numEmpleado) return;
 
       btn.disabled = true;
-      btn.textContent = 'Verificando...';
+      btn.textContent = 'Verificando acceso...';
       errMsg.classList.remove('visible');
 
       try {
         const res = await fetch('/api/takata/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usuario, clave }),
+          body: JSON.stringify({ numEmpleado, usuario: numEmpleado, clave }),
           credentials: 'include'
         });
 
-        if (res.ok) {
-          btn.textContent = '✓ Acceso concedido';
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.ok) {
+          if (data.user) {
+            try { localStorage.setItem('takata_current_user', JSON.stringify(data.user)); } catch (_) {}
+          }
+          btn.textContent = '✓ Bienvenido ' + (data.user?.fullName || '');
           window.location.href = './';
         } else {
+          errMsg.textContent = '⚠️ ' + (data.error || 'Colaborador sin acceso autorizado en admin.toyoter.com.');
           errMsg.classList.add('visible');
           btn.disabled = false;
-          btn.textContent = 'Iniciar sesión';
+          btn.textContent = 'Ingresar al Portal';
         }
       } catch (err) {
         errMsg.textContent = 'Error de conexión. Intenta de nuevo.';
         errMsg.classList.add('visible');
         btn.disabled = false;
-        btn.textContent = 'Iniciar sesión';
+        btn.textContent = 'Ingresar al Portal';
       }
     });
   </script>
