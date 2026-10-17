@@ -35,8 +35,8 @@ function getGestorToken(req) {
 function gestorAuth(req, res, next) {
   const p = req.path;
   
-  // Si la ruta es para Takata, permitir continuar (Takata tiene su propio login)
-  if (p.startsWith('/takata')) {
+  // Si la ruta es para Takata (vista o API), permitir continuar (Takata tiene su propio login y middleware takataApiAuth)
+  if (p.startsWith('/takata') || p.startsWith('/api/takata')) {
     return next();
   }
   

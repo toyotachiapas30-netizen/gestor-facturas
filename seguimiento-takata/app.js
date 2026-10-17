@@ -133,21 +133,46 @@ async function loadAll() {
   try {
     setStatus('Conectando...');
 
-    // 1. Cargar estado de la nube (rápido)
+    // 1. Cargar estado de la nube (rápido) y respaldar/sincronizar con localStorage
+    let lsEdits = {}, lsProceso = {}, lsCustom = [], lsCamp = {};
+    try { lsEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')        || '{}'); } catch { lsEdits = {}; }
+    try { lsProceso = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { lsProceso = {}; }
+    try { lsCustom  = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { lsCustom = []; }
+    try { lsCamp    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { lsCamp = {}; }
+
     const cloudResponse = await fetch(`${API}/state`, { credentials: 'same-origin' }).catch(() => null);
     if (cloudResponse && cloudResponse.ok) {
       const cloudState = await cloudResponse.json();
-      localEdits   = cloudState.edits      || {};
-      procesoEdits = cloudState.proceso    || {};
-      customVins   = cloudState.customVins || [];
-      campEdits    = cloudState.camp       || {};
+      localEdits   = { ...lsEdits,   ...(cloudState.edits   || {}) };
+      procesoEdits = { ...lsProceso, ...(cloudState.proceso || {}) };
+      customVins   = cloudState.customVins || lsCustom || [];
+      campEdits    = { ...lsCamp,    ...(cloudState.camp    || {}) };
+
+      // Si había cambios guardados localmente mientras estuvo offline, subirlos a Supabase
+      if (!isReadOnly) {
+        Object.keys(lsEdits).forEach(vin => {
+          if (!cloudState.edits?.[vin]) saveEdit(vin);
+        });
+        Object.keys(lsProceso).forEach(vin => {
+          if (!cloudState.proceso?.[vin]) saveProcesoEntry(vin);
+        });
+      }
+
+      // Actualizar caché local con el estado completo de la nube
+      try {
+        localStorage.setItem('takata_edits_v2', JSON.stringify(localEdits));
+        localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits));
+        localStorage.setItem('takata_custom_vins_v1', JSON.stringify(customVins));
+        localStorage.setItem('takata_camp_edits_v1', JSON.stringify(campEdits));
+      } catch (e) {}
+
       console.log('☁️ Estado cargado desde Supabase');
     } else {
       console.warn('💾 Usando datos locales (offline)');
-      try { localEdits   = JSON.parse(localStorage.getItem('takata_edits_v2')        || '{}'); } catch { localEdits = {}; }
-      try { procesoEdits = JSON.parse(localStorage.getItem('takata_proceso_edits_v1') || '{}'); } catch { procesoEdits = {}; }
-      try { customVins   = JSON.parse(localStorage.getItem('takata_custom_vins_v1')  || '[]'); } catch { customVins = []; }
-      try { campEdits    = JSON.parse(localStorage.getItem('takata_camp_edits_v1')   || '{}'); } catch { campEdits = {}; }
+      localEdits   = lsEdits;
+      procesoEdits = lsProceso;
+      customVins   = lsCustom;
+      campEdits    = lsCamp;
     }
 
     if (isReadOnly) {
@@ -170,8 +195,13 @@ async function loadAll() {
     // 4. Procesar datos de proceso
     Object.values(procesoEdits).forEach(pe => {
       const idx = procesoData.findIndex(r => r.vin === pe.vin);
-      if (idx >= 0) Object.assign(procesoData[idx], pe);
-      else procesoData.unshift(pe);
+      if (idx >= 0) {
+        const prevCliente = procesoData[idx].cliente;
+        Object.assign(procesoData[idx], pe);
+        if (!procesoData[idx].cliente && prevCliente) procesoData[idx].cliente = prevCliente;
+      } else {
+        procesoData.unshift(pe);
+      }
     });
 
     // 5. Inicializar UI principal
@@ -887,12 +917,21 @@ function updateBaseField(vin, field, value) {
     }
   }
 
+  const base = vinData.find(r => r.vin === vin) || {};
   const current = localEdits[vin] || {};
   if (current[field] === finalValue) return;
 
-  localEdits[vin] = { ...current, [field]: finalValue };
+  localEdits[vin] = {
+    contactado: current.contactado || base.contactado || 'NO CONTACTADO',
+    cita: current.cita ?? base.cita ?? '',
+    observacion: current.observacion ?? base.observacion ?? '',
+    dealer: current.dealer ?? base.dealer ?? '',
+    ...current,
+    [field]: finalValue
+  };
 
-  // Guardar en la nube
+  // Guardar en localStorage y en la nube
+  try { localStorage.setItem('takata_edits_v2', JSON.stringify(localEdits)); } catch (e) {}
   saveEdit(vin);
 
   if (field === 'cita' && finalValue) {
@@ -930,7 +969,8 @@ function syncToProceso(vin, citaRaw, obs) {
   };
 
   procesoEdits[vin] = procesoEntry;
-  saveProcesoEdits();
+  try { localStorage.setItem('takata_proceso_edits_v1', JSON.stringify(procesoEdits)); } catch (e) {}
+  saveProcesoEntry(vin);
 
   const idx = procesoData.findIndex(r => r.vin === vin);
   if (idx >= 0) Object.assign(procesoData[idx], procesoEntry);
