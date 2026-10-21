@@ -1499,6 +1499,8 @@ function populateCategorias() {
 
 // ── Authentication & Role Restrictions ────────────────────────────────────────
 let userRole = 'admin';
+let userEmp = '';
+let initialViewResolved = false;
 
 async function checkUserRole() {
   try {
@@ -1511,6 +1513,7 @@ async function checkUserRole() {
     if (data.ok) {
       const prevRole = userRole;
       userRole = data.role;
+      userEmp = String(data.user?.employeeNumber || '').trim();
       const fullName = data.user?.fullName || '';
       const roleLabel = userRole === 'admin' ? 'Admin (Ambas Sucursales)' : (userRole === 'poniente' ? 'Poniente' : 'Oriente');
       const icon = userRole === 'admin' ? '👤' : '📍';
@@ -1520,10 +1523,31 @@ async function checkUserRole() {
         tag.style.display = 'inline-block';
         tag.textContent = fullName ? `${icon} ${fullName} · ${roleLabel}` : `${icon} ${roleLabel}`;
       }
+
+      // Mostrar la pestaña Bandeja de Entrada ÚNICAMENTE al trabajador 9997
+      const tabBandeja = document.getElementById('tab-bandeja');
+      const is9997 = userEmp === '9997';
+      if (tabBandeja) {
+        tabBandeja.style.display = is9997 ? '' : 'none';
+      }
+
+      if (!initialViewResolved) {
+        initialViewResolved = true;
+        if (is9997) {
+          switchMainView('bandeja');
+        } else {
+          switchMainView('facturas');
+        }
+      } else if (!is9997) {
+        const viewBandeja = document.getElementById('view-bandeja');
+        if (viewBandeja && viewBandeja.classList.contains('active')) {
+          switchMainView('facturas');
+        }
+      }
       
       applyRoleRestrictions();
       if (prevRole !== userRole) {
-        renderBandeja();
+        if (is9997) renderBandeja();
         loadGastos();
       }
     }
@@ -2034,7 +2058,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   checkGoogleAuth();
   populateCategorias();
-  loadBandeja();
+  if (userEmp === '9997') loadBandeja();
   loadGastos();
   loadProveedores();
 });

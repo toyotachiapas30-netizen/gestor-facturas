@@ -35,10 +35,10 @@
 
   <!-- Main Navigation Tabs -->
   <div class="main-tabs" id="main-tabs">
-    <button class="main-tab active" data-view="bandeja" onclick="switchMainView('bandeja')">
+    <button class="main-tab" id="tab-bandeja" data-view="bandeja" onclick="switchMainView('bandeja')" style="display:none;">
       📥 Bandeja de Entrada <span id="bandeja-badge-pendientes" class="bandeja-tab-badge" style="display:none;">0</span>
     </button>
-    <button class="main-tab" data-view="facturas" onclick="switchMainView('facturas')">
+    <button class="main-tab active" data-view="facturas" onclick="switchMainView('facturas')">
       🧾 Flujo de Facturas
     </button>
     <button class="main-tab" data-view="gastos" onclick="switchMainView('gastos')">
@@ -49,7 +49,7 @@
   <!-- ══════════════════════════════════════════
        VIEW: BANDEJA DE ENTRADA (PRE-PASO)
   ═══════════════════════════════════════════ -->
-  <div class="main-view active" id="view-bandeja">
+  <div class="main-view" id="view-bandeja">
 
     <!-- Aviso de autorización de Gmail -->
     <div id="bandeja-auth-banner" class="card" style="display:none; border: 2px solid #f59e0b; background: #fffbeb; margin-bottom: 20px;">
@@ -172,7 +172,7 @@
   <!-- ══════════════════════════════════════════
        VIEW: FACTURAS
   ═══════════════════════════════════════════ -->
-  <div class="main-view" id="view-facturas">
+  <div class="main-view active" id="view-facturas">
 
     <!-- Config warning -->
     <div id="config-banner" class="hidden">
@@ -754,6 +754,6 @@
 <!-- ══ Scripts ══════════════════ -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="app.js?v=v5"></script>
+<script src="app.js?v=v6"></script>
 </body>
 </html>

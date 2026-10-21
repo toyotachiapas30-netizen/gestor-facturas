@@ -7,6 +7,13 @@ const { getDB, getGestorRole, backupDatabaseToDrive } = require('./gastos');
 
 // ── Helpers para Gmail & CFDI ──────────────────────────────
 
+function isAuthorizedBandejaUser(req) {
+  const cookies = req.headers.cookie || '';
+  const found = cookies.split(';').map(c => c.trim()).find(c => c.startsWith('gestor_emp='));
+  const emp = found ? decodeURIComponent(found.split('=')[1]).trim() : '';
+  return emp === '9997';
+}
+
 function getHeader(headers, name) {
   if (!Array.isArray(headers)) return '';
   const h = headers.find(x => (x.name || '').toLowerCase() === name.toLowerCase());
@@ -290,6 +297,9 @@ function pairXmlsAndPdfs(xmlItems, pdfParts, otherParts) {
 // Lista correos de Gmail con facturas XML adjuntas, agrupados por correo
 router.get('/inbox', async (req, res) => {
   try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).json({ ok: false, error: 'La Bandeja de Entrada es exclusiva para el trabajador 9997.' });
+    }
     const client = getAuthorizedClient();
     if (!client) {
       return res.status(401).json({
@@ -542,6 +552,9 @@ router.get('/inbox', async (req, res) => {
 // Descarga o muestra en línea un archivo adjunto de Gmail (.xml, .pdf, imágenes, cotizaciones)
 router.get('/attachment/:messageId/:attachmentId', async (req, res) => {
   try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).send('Acceso exclusivo para el trabajador 9997.');
+    }
     const client = getAuthorizedClient();
     if (!client) return res.status(401).send('Google no autorizado');
 
@@ -596,6 +609,9 @@ router.get('/attachment/:messageId/:attachmentId', async (req, res) => {
 // Cambia manualmente el estatus de una factura en la Bandeja (pendiente | procesado | descartado)
 router.patch('/estatus', async (req, res) => {
   try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).json({ ok: false, error: 'Acceso exclusivo para el trabajador 9997.' });
+    }
     const { idClave, messageId, uuid, estatus } = req.body || {};
     if (!idClave && !uuid) {
       return res.status(400).json({ ok: false, error: 'Falta identificador de la factura (idClave o uuid).' });
