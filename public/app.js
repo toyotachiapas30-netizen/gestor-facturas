@@ -1675,8 +1675,15 @@ async function loadBandeja(force = false) {
   try {
     const anio = document.getElementById('bandeja-anio')?.value || 'todos';
     const mes = document.getElementById('bandeja-mes')?.value || 'todos';
-    const res = await fetch(`/api/mail/inbox?anio=${encodeURIComponent(anio)}&mes=${encodeURIComponent(mes)}`);
-    const data = await res.json();
+    let res = await fetch(`/api/mail/inbox?anio=${encodeURIComponent(anio)}&mes=${encodeURIComponent(mes)}`, { cache: 'no-store' });
+    let rawText = await res.text();
+    if (!rawText || !rawText.trim()) {
+      // Reintento automático si el servidor estaba reiniciando contenedor
+      await new Promise(r => setTimeout(r, 1200));
+      res = await fetch(`/api/mail/inbox?anio=${encodeURIComponent(anio)}&mes=${encodeURIComponent(mes)}`, { cache: 'no-store' });
+      rawText = await res.text();
+    }
+    const data = rawText ? JSON.parse(rawText) : { ok: false, error: 'Respuesta vacía del servidor, intenta de nuevo.' };
 
     const banner = document.getElementById('bandeja-auth-banner');
 
