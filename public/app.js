@@ -1710,7 +1710,16 @@ async function loadBandeja(force = false) {
     }
 
     if (banner) banner.style.display = 'none';
-    window.bandejaEmails = data.correos || [];
+    // Filtrar Google Payments en cliente de forma inmediata
+    window.bandejaEmails = (data.correos || []).filter(c => {
+      const s = `${c.fromName || ''} ${c.fromEmail || ''} ${c.subject || ''}`.toLowerCase();
+      if (s.includes('google payments') || s.includes('payments-noreply@google.com')) return false;
+      c.facturas = (c.facturas || []).filter(f => {
+        const em = `${f.nombreEmisor || ''} ${f.rfcEmisor || ''}`.toUpperCase();
+        return !em.includes('GOOGLE CLOUD') && !em.includes('GCM221031837');
+      });
+      return c.facturas.length > 0;
+    });
     renderBandeja();
   } catch (err) {
     console.error('Error en loadBandeja:', err);

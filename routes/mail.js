@@ -312,8 +312,8 @@ router.get('/inbox', async (req, res) => {
     const { mes = 'todos', anio = 'todos', limit = '35' } = req.query;
     const maxResults = Math.min(Math.max(parseInt(limit, 10) || 35, 5), 60);
 
-    // Construir filtro de búsqueda para Gmail
-    let gmailQuery = 'has:attachment filename:xml';
+    // Construir filtro de búsqueda para Gmail (excluyendo Google Payments)
+    let gmailQuery = 'has:attachment filename:xml -from:payments-noreply@google.com -"Google Payments"';
     if (anio && anio !== 'todos') {
       const y = parseInt(anio, 10);
       if (!isNaN(y)) {
@@ -474,6 +474,12 @@ router.get('/inbox', async (req, res) => {
     // Enriquecer cada factura con su estatus actual (Automático por BD Gastos + Manual)
     const correosEnriquecidos = [];
     for (const c of correos) {
+      // Excluir correos de Google Payments / Google Cloud México
+      const senderCheck = `${c.fromName || ''} ${c.fromEmail || ''} ${c.subject || ''}`.toLowerCase();
+      if (senderCheck.includes('google payments') || senderCheck.includes('payments-noreply@google.com')) {
+        continue;
+      }
+
       // Filtrado exacto por mes/año del correo si fue solicitado
       if (anio && anio !== 'todos') {
         const d = new Date(c.fechaMs);
@@ -485,7 +491,13 @@ router.get('/inbox', async (req, res) => {
         if (mes && mes !== 'todos' && itemMonth !== String(mes).padStart(2, '0')) continue;
       }
 
-      const facturasConEstatus = c.facturas.map(f => {
+      const facturasSinGoogle = (c.facturas || []).filter(f => {
+        const emisorStr = `${f.nombreEmisor || ''} ${f.rfcEmisor || ''}`.toUpperCase();
+        return !emisorStr.includes('GOOGLE CLOUD') && !emisorStr.includes('GCM221031837');
+      });
+      if (facturasSinGoogle.length === 0) continue;
+
+      const facturasConEstatus = facturasSinGoogle.map(f => {
         const uuidUpper = (f.uuid || '').toUpperCase();
         const claveUpper = (f.idClave || '').toUpperCase();
         const gastoMatch = uuidUpper ? gastosByUuid.get(uuidUpper) : null;
