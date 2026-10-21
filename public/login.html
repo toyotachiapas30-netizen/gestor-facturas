@@ -161,42 +161,61 @@
       </div>
     </div>
 
-    <h1>Control de Gastos y Facturas</h1>
-    <p class="subtitle">Toyota Farrera — Acceso Interno</p>
+    <h1>Control de Pagos y Facturas</h1>
+    <p class="subtitle">Ingresa tu número de empleado autorizado en <strong>admin.toyoter.com</strong></p>
 
     <form id="loginForm">
       <div class="field">
-        <label for="usuario">Usuario</label>
-        <input type="text" id="usuario" name="usuario" placeholder="Ingresa tu usuario (oriente / poniente)" autocomplete="username" required>
+        <label for="usuario">Número de Empleado</label>
+        <input type="text" id="usuario" name="usuario" placeholder="Ej. 9997" autocomplete="username" autofocus required>
       </div>
-      <div class="field">
+      <div class="field" id="passwordFieldWrap" style="display:none;">
         <label for="clave">Contraseña</label>
-        <input type="password" id="clave" name="clave" placeholder="••••••••" autocomplete="current-password" required>
+        <input type="password" id="clave" name="clave" placeholder="••••••••" autocomplete="current-password">
       </div>
-      <button type="submit" class="btn" id="loginBtn">Iniciar sesión</button>
-      <div class="error-msg" id="errorMsg">Usuario o contraseña incorrectos</div>
+      <button type="submit" class="btn" id="loginBtn">Ingresar al Portal</button>
+      <div class="error-msg" id="errorMsg">Número de empleado sin acceso autorizado</div>
     </form>
 
-    <p class="footer-note">Acceso exclusivo para personal de Toyota</p>
+    <p class="footer-note" style="display:flex; align-items:center; justify-content:center; gap:6px;">
+      <span style="width:7px; height:7px; border-radius:50%; background:#10b981; display:inline-block;"></span>
+      Conectado con admin.toyoter.com (KPIs | Seguimientos)
+    </p>
   </div>
 
   <script>
+    const inputUsuario = document.getElementById('usuario');
+    const passWrap = document.getElementById('passwordFieldWrap');
+    const inputClave = document.getElementById('clave');
+
+    inputUsuario.addEventListener('input', function() {
+      const val = this.value.trim().toLowerCase();
+      if (val === 'admin' || val === 'oriente' || val === 'poniente') {
+        passWrap.style.display = 'block';
+        inputClave.required = true;
+      } else {
+        passWrap.style.display = 'none';
+        inputClave.required = false;
+        inputClave.value = '';
+      }
+    });
+
     document.getElementById('loginForm').addEventListener('submit', async function(e) {
       e.preventDefault();
       const btn = document.getElementById('loginBtn');
       const errMsg = document.getElementById('errorMsg');
-      const usuario = document.getElementById('usuario').value.trim().toLowerCase();
-      const clave   = document.getElementById('clave').value;
+      const usuario = inputUsuario.value.trim();
+      const clave   = inputClave.value;
 
       btn.disabled = true;
-      btn.textContent = 'Iniciando sesión...';
+      btn.textContent = 'Verificando acceso...';
       errMsg.classList.remove('visible');
 
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usuario, clave })
+          body: JSON.stringify({ numEmpleado: usuario, usuario, clave })
         });
 
         const data = await res.json();
@@ -205,16 +224,16 @@
           btn.textContent = '✓ Acceso concedido';
           window.location.href = '/';
         } else {
-          errMsg.textContent = data.error || 'Usuario o contraseña incorrectos';
+          errMsg.textContent = data.error || 'Número de empleado sin acceso autorizado en admin.toyoter.com';
           errMsg.classList.add('visible');
           btn.disabled = false;
-          btn.textContent = 'Iniciar sesión';
+          btn.textContent = 'Ingresar al Portal';
         }
       } catch (err) {
         errMsg.textContent = 'Error de conexión. Intenta de nuevo.';
         errMsg.classList.add('visible');
         btn.disabled = false;
-        btn.textContent = 'Iniciar sesión';
+        btn.textContent = 'Ingresar al Portal';
       }
     });
   </script>

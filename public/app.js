@@ -1502,29 +1502,39 @@ let userRole = 'admin';
 
 async function checkUserRole() {
   try {
-    const r = await fetch('/api/auth/me');
+    const r = await fetch('/api/auth/me', { cache: 'no-store' });
     if (r.status === 401) {
       window.location.href = '/login.html';
       return;
     }
     const data = await r.json();
     if (data.ok) {
+      const prevRole = userRole;
       userRole = data.role;
+      const fullName = data.user?.fullName || '';
+      const roleLabel = userRole === 'admin' ? 'Admin (Ambas Sucursales)' : (userRole === 'poniente' ? 'Poniente' : 'Oriente');
+      const icon = userRole === 'admin' ? '👤' : '📍';
       
       const tag = document.getElementById('user-display-tag');
       if (tag) {
         tag.style.display = 'inline-block';
-        if (userRole === 'admin') tag.textContent = '👤 Admin';
-        else if (userRole === 'poniente') tag.textContent = '📍 Poniente';
-        else if (userRole === 'oriente') tag.textContent = '📍 Oriente';
+        tag.textContent = fullName ? `${icon} ${fullName} · ${roleLabel}` : `${icon} ${roleLabel}`;
       }
       
       applyRoleRestrictions();
+      if (prevRole !== userRole) {
+        renderBandeja();
+        loadGastos();
+      }
     }
   } catch (err) {
     console.error('Error checking user role:', err);
   }
 }
+
+// Revalidar permisos en tiempo real al volver a la pestaña y cada 25s
+window.addEventListener('focus', () => checkUserRole());
+setInterval(() => checkUserRole(), 25000);
 
 function applyRoleRestrictions() {
   const filterSuc = document.getElementById('filter-sucursal');
@@ -1572,6 +1582,13 @@ function applyRoleRestrictions() {
       inpSuc.disabled = true;
     }
     if (fieldInp) fieldInp.style.display = 'none';
+  } else {
+    if (fieldFilter) fieldFilter.style.display = '';
+    if (fieldBandejaSuc) fieldBandejaSuc.style.display = '';
+    if (gfSuc) gfSuc.disabled = false;
+    if (fieldGf) fieldGf.style.display = '';
+    if (inpSuc) inpSuc.disabled = false;
+    if (fieldInp) fieldInp.style.display = '';
   }
 }
 
