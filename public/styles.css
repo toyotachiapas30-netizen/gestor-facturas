@@ -423,3 +423,222 @@ header p { color:var(--text-sub); font-size:15px; }
   .gastos-summary{grid-template-columns:1fr 1fr;}
   .main-tabs{flex-direction:column;}
 }
+
+/* ── Bandeja de Entrada (Tarjetas Agrupadas por Correo) ── */
+.bandeja-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eb0a1e;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  margin-left: 6px;
+}
+
+.bandeja-email-card {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 20px 22px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.bandeja-email-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+}
+.bandeja-email-card.all-processed {
+  border-left: 4px solid #10b981;
+}
+.bandeja-email-card.has-pending {
+  border-left: 4px solid #f59e0b;
+}
+
+.bandeja-email-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.bandeja-sender-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.bandeja-sender-email {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
+}
+.bandeja-subject {
+  font-size: 13px;
+  color: #334155;
+  margin-top: 4px;
+  font-weight: 500;
+}
+.bandeja-date-badge {
+  font-size: 12px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.bandeja-invoice-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  transition: background 0.15s;
+}
+.bandeja-invoice-box.procesado {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.bandeja-invoice-box.descartado {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  opacity: 0.72;
+}
+
+.bandeja-invoice-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.bandeja-invoice-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 13px;
+  color: #1e293b;
+  align-items: center;
+}
+
+.bandeja-invoice-concepto {
+  font-size: 12px;
+  color: #475569;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.bandeja-invoice-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.bandeja-files-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.bandeja-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1e293b;
+  transition: all 0.15s;
+  cursor: pointer;
+}
+.bandeja-file-chip:hover {
+  border-color: #3b82f6;
+  color: #2563eb;
+  background: #eff6ff;
+}
+.bandeja-file-chip.xml {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.bandeja-file-chip.pdf {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.bandeja-file-chip.extra {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.bandeja-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bandeja-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.bandeja-status-pill.pendiente {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+.bandeja-status-pill.procesado {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+.bandeja-status-pill.descartado {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+.bandeja-extra-docs {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+}
+.bandeja-extra-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 8px;
+}

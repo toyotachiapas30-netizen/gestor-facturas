@@ -64,6 +64,28 @@ function getDB() {
   try { _db.exec(`ALTER TABLE gastos ADD COLUMN sucursal TEXT`); } catch (err) {}
   try { _db.exec(`ALTER TABLE gastos ADD COLUMN factura_url TEXT`); } catch (err) {}
 
+  // Tablas para Bandeja de Entrada (Gmail) y Configuración Persistente
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS bandeja_estado (
+      id_clave TEXT PRIMARY KEY,
+      message_id TEXT,
+      uuid TEXT,
+      estatus TEXT DEFAULT 'pendiente',
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS bandeja_cache (
+      message_id TEXT PRIMARY KEY,
+      fecha_ms INTEGER,
+      data_json TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS bandeja_config (
+      clave TEXT PRIMARY KEY,
+      valor TEXT,
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+  `);
+
   return _db;
 }
 
@@ -809,6 +831,8 @@ router.get('/:id/download-factura', async (req, res) => {
 
 module.exports = {
   router,
+  getDB,
+  getGestorRole,
   restoreDatabaseFromDrive,
   backupDatabaseToDrive
 };

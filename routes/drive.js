@@ -19,7 +19,8 @@ function getRedirectUri(req) {
 
 const SCOPES = [
   'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/spreadsheets'
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/gmail.readonly'
 ];
 
 function getOAuthClient(req) {
@@ -37,6 +38,21 @@ function getOAuthClient(req) {
 
 function getAuthorizedClient() {
   const client = getOAuthClient();
+
+  // 0. Preferir archivo local si ya cuenta con permiso de Gmail (re-autorizado recientemente)
+  if (fs.existsSync(TOKENS_FILE)) {
+    try {
+      const localTokens = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
+      if (localTokens && localTokens.refresh_token && localTokens.scope && localTokens.scope.includes('gmail')) {
+        client.setCredentials({
+          ...localTokens,
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET
+        });
+        return client;
+      }
+    } catch (e) {}
+  }
   
   // 1. Try Refresh Token from Env (Cloud Mode)
   if (process.env.GOOGLE_REFRESH_TOKEN) {
@@ -76,7 +92,31 @@ router.get('/callback', async (req, res) => {
   try {
     const client = getOAuthClient(req);
     const { tokens } = await client.getToken(code);
+    if (!tokens.refresh_token && fs.existsSync(TOKENS_FILE)) {
+      try {
+        const prev = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
+        if (prev.refresh_token) tokens.refresh_token = prev.refresh_token;
+      } catch (e) {}
+    }
+    if (!tokens.refresh_token && process.env.GOOGLE_REFRESH_TOKEN) {
+      tokens.refresh_token = process.env.GOOGLE_REFRESH_TOKEN;
+    }
     fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens));
+
+    // Guardar copia de seguridad en SQLite + Google Drive para persistencia automática en Render
+    try {
+      const { getDB, backupDatabaseToDrive } = require('./gastos');
+      const db = getDB();
+      db.prepare(`
+        INSERT INTO bandeja_config (clave, valor, updated_at)
+        VALUES ('google_tokens', ?, datetime('now','localtime'))
+        ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor, updated_at = excluded.updated_at
+      `).run(JSON.stringify(tokens));
+      await backupDatabaseToDrive();
+      console.log('✅ Google tokens respaldados en SQLite y Google Drive.');
+    } catch (sqlErr) {
+      console.error('⚠️ Error al respaldar tokens en SQLite:', sqlErr.message);
+    }
 
     // Guardar copia de seguridad en Supabase
     if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
@@ -219,6 +259,20 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async 
 });
 
 async function restoreTokensFromDatabase() {
+  // 1. Intentar restaurar desde SQLite (respaldado en Google Drive) si tiene el permiso de Gmail
+  try {
+    const { getDB } = require('./gastos');
+    const db = getDB();
+    const row = db.prepare("SELECT valor FROM bandeja_config WHERE clave = 'google_tokens'").get();
+    if (row && row.valor) {
+      fs.writeFileSync(TOKENS_FILE, row.valor);
+      console.log('✅ Tokens de Google (con Gmail) restaurados desde SQLite.');
+      return;
+    }
+  } catch (err) {
+    console.warn('⚠️ Aviso al verificar tokens en SQLite:', err.message);
+  }
+
   if (fs.existsSync(TOKENS_FILE)) return;
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
     console.log('ℹ️ Supabase no configurado, omitiendo restauración de tokens de Google.');

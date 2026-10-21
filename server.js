@@ -47,7 +47,8 @@ function gestorAuth(req, res, next) {
     '/hero_bg.jpg', 
     '/toyota-chiapas.png', 
     '/farrera-poniente.png', 
-    '/api/auth/login'
+    '/api/auth/login',
+    '/api/drive/callback'
   ];
   
   if (allowed.includes(p) || p === '/login') {
@@ -142,8 +143,8 @@ app.post('/api/auth/login', (req, res) => {
   
   if (clave === 'toyota2026' && (lowerUser === 'admin' || lowerUser === 'oriente' || lowerUser === 'poniente')) {
     res.setHeader('Set-Cookie', [
-      `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`,
-      `gestor_role=${lowerUser}; Path=/; SameSite=Strict; Max-Age=604800`
+      `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
+      `gestor_role=${lowerUser}; Path=/; SameSite=Lax; Max-Age=604800`
     ]);
     res.json({ ok: true, role: lowerUser });
   } else {

@@ -121,6 +121,7 @@ function switchMainView(view) {
   document.querySelectorAll('.main-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   document.querySelectorAll('.main-view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
   if (view === 'gastos') loadGastos();
+  if (view === 'bandeja') loadBandeja();
 }
 
 // ── Step navigation ───────────────────────────────────────────────────────────
@@ -599,6 +600,19 @@ async function autoRegistrarGasto(concepto, categoria, sheetUrl, facturaUrl) {
         sucursal: sucursalName
       })
     });
+    // Si esta factura provino de la Bandeja de Entrada, actualizar su estado en memoria
+    if (c.uuid && Array.isArray(window.bandejaEmails)) {
+      const targetUuid = String(c.uuid).toUpperCase();
+      window.bandejaEmails.forEach(em => {
+        (em.facturas || []).forEach(f => {
+          if (String(f.uuid || '').toUpperCase() === targetUuid) {
+            f.estatus = 'procesado';
+            f.origenEstatus = 'gastos_db';
+          }
+        });
+      });
+      renderBandeja();
+    }
   } catch (err) {
     console.error('Auto-registro gasto error:', err.message);
   }
@@ -641,11 +655,14 @@ async function authGoogle() {
     const interval = setInterval(async () => {
         const authorized = await checkGoogleAuth();
         checks++;
-        if (authorized || checks > 10) {
+        if (authorized) {
+            loadBandeja(true);
+        }
+        if (authorized || checks > 12) {
             clearInterval(interval);
             if (authorized) loadSheets();
         }
-    }, 5000);
+    }, 4000);
   } catch(err) { alert('Error: '+err.message); }
 }
 
@@ -1513,14 +1530,18 @@ function applyRoleRestrictions() {
   const filterSuc = document.getElementById('filter-sucursal');
   const gfSuc = document.getElementById('gf-sucursal');
   const inpSuc = document.getElementById('inp-sucursal');
+  const bandejaSuc = document.getElementById('bandeja-sucursal');
   
   const fieldFilter = document.getElementById('field-filter-sucursal');
   const fieldGf = document.getElementById('field-gf-sucursal');
   const fieldInp = document.getElementById('field-inp-sucursal');
+  const fieldBandejaSuc = document.getElementById('field-bandeja-sucursal');
 
   if (userRole === 'poniente') {
     if (filterSuc) filterSuc.value = 'Toyota Farrera Poniente';
     if (fieldFilter) fieldFilter.style.display = 'none';
+    if (bandejaSuc) bandejaSuc.value = 'Toyota Farrera Poniente';
+    if (fieldBandejaSuc) fieldBandejaSuc.style.display = 'none';
 
     if (gfSuc) {
       gfSuc.value = 'Toyota Farrera Poniente';
@@ -1537,6 +1558,8 @@ function applyRoleRestrictions() {
   } else if (userRole === 'oriente') {
     if (filterSuc) filterSuc.value = 'Toyota Chiapas';
     if (fieldFilter) fieldFilter.style.display = 'none';
+    if (bandejaSuc) bandejaSuc.value = 'Toyota Chiapas';
+    if (fieldBandejaSuc) fieldBandejaSuc.style.display = 'none';
 
     if (gfSuc) {
       gfSuc.value = 'Toyota Chiapas';
@@ -1549,6 +1572,418 @@ function applyRoleRestrictions() {
       inpSuc.disabled = true;
     }
     if (fieldInp) fieldInp.style.display = 'none';
+  }
+}
+
+// ── BANDEJA DE ENTRADA (GMAIL PRE-PASO A PAGO) ────────────────────────────────
+window.bandejaEmails = [];
+let bandejaLoading = false;
+
+function getAttachmentIcon(filename = '') {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.pdf')) return '📑';
+  if (lower.endsWith('.xml')) return '📄';
+  if (/\.(png|jpg|jpeg|gif|webp)$/.test(lower)) return '🖼️';
+  if (/\.(xls|xlsx|csv)$/.test(lower)) return '📊';
+  if (/\.(doc|docx)$/.test(lower)) return '📝';
+  if (/\.(zip|rar)$/.test(lower)) return '🗜️';
+  return '📎';
+}
+
+function fmtEmailDate(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return d.toLocaleDateString('es-MX', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+async function loadBandeja(force = false) {
+  if (bandejaLoading && !force) return;
+  bandejaLoading = true;
+
+  const btn = document.getElementById('btn-refresh-bandeja');
+  const spin = document.getElementById('spin-bandeja');
+  if (btn) btn.disabled = true;
+  if (spin) spin.style.display = 'inline-block';
+
+  const listEl = document.getElementById('bandeja-list');
+  if (listEl && (window.bandejaEmails.length === 0 || force)) {
+    listEl.innerHTML = `
+      <div class="card" style="text-align:center; padding:45px 20px; color:#475569;">
+        <div style="font-size:32px; margin-bottom:10px;">📬</div>
+        <div style="font-weight:600; font-size:15px;">Sincronizando tu Bandeja de Gmail...</div>
+        <div style="font-size:13px; color:#64748b; margin-top:4px;">Buscando correos con facturas (.xml + .pdf) y agrupando su documentación adjunta.</div>
+      </div>
+    `;
+  }
+
+  try {
+    const anio = document.getElementById('bandeja-anio')?.value || 'todos';
+    const mes = document.getElementById('bandeja-mes')?.value || 'todos';
+    const res = await fetch(`/api/mail/inbox?anio=${encodeURIComponent(anio)}&mes=${encodeURIComponent(mes)}`);
+    const data = await res.json();
+
+    const banner = document.getElementById('bandeja-auth-banner');
+
+    if (!res.ok || !data.ok) {
+      if (data.needsAuth || data.needsGmailScope || res.status === 401 || res.status === 403) {
+        if (banner) banner.style.display = 'block';
+        if (listEl) {
+          listEl.innerHTML = `
+            <div class="card empty-state" style="padding:45px 24px;">
+              <div class="empty-icon">🔐</div>
+              <div class="empty-title">Conecta tu correo de Gmail para ver tus facturas recibidas</div>
+              <div class="empty-sub" style="max-width:520px; margin:8px auto 20px;">
+                Haz clic en el botón de abajo para autorizar por única vez la lectura de correos con facturas (<code>.xml</code> y <code>.pdf</code>) y sus anexos.
+              </div>
+              <button class="btn btn-primary" onclick="authGoogle()" style="padding:10px 22px; font-size:14px;">
+                🔗 Conectar y Autorizar Gmail
+              </button>
+            </div>
+          `;
+        }
+        return;
+      }
+      throw new Error(data.error || 'Error al consultar la bandeja de entrada');
+    }
+
+    if (banner) banner.style.display = 'none';
+    window.bandejaEmails = data.correos || [];
+    renderBandeja();
+  } catch (err) {
+    console.error('Error en loadBandeja:', err);
+    if (listEl) {
+      listEl.innerHTML = `
+        <div class="card empty-state">
+          <div class="empty-icon">⚠️</div>
+          <div class="empty-title">No se pudo cargar la Bandeja de Entrada</div>
+          <div class="empty-sub">${esc(err.message)}</div>
+          <button class="btn btn-outline" onclick="loadBandeja(true)" style="margin-top:16px;">🔄 Reintentar</button>
+        </div>
+      `;
+    }
+  } finally {
+    bandejaLoading = false;
+    if (btn) btn.disabled = false;
+    if (spin) spin.style.display = 'none';
+  }
+}
+
+function renderBandeja() {
+  const listEl = document.getElementById('bandeja-list');
+  if (!listEl) return;
+
+  const search = (document.getElementById('bandeja-search')?.value || '').trim().toLowerCase();
+  const estatusFilter = document.getElementById('bandeja-estatus')?.value || 'todos';
+  const sucursalFilter = document.getElementById('bandeja-sucursal')?.value || 'todas';
+
+  let totalFacturas = 0;
+  let totalPendientes = 0;
+  let totalProcesadas = 0;
+  let montoPendiente = 0;
+
+  // Primero contabilizar KPIs globales (respetando sucursal)
+  for (const correo of window.bandejaEmails) {
+    for (const f of (correo.facturas || [])) {
+      if (sucursalFilter !== 'todas' && f.sucursal !== sucursalFilter) continue;
+      if (f.estatus === 'descartado' && estatusFilter !== 'descartado') {
+        // No inflar pendientes con descartados
+        continue;
+      }
+      totalFacturas++;
+      if (f.estatus === 'procesado') {
+        totalProcesadas++;
+      } else if (f.estatus === 'pendiente') {
+        totalPendientes++;
+        montoPendiente += Number(f.total) || 0;
+      }
+    }
+  }
+
+  const elTotal = document.getElementById('bandeja-stat-total');
+  const elPend = document.getElementById('bandeja-stat-pendientes');
+  const elProc = document.getElementById('bandeja-stat-procesadas');
+  const elMonto = document.getElementById('bandeja-stat-monto');
+  const badgeTab = document.getElementById('bandeja-badge-pendientes');
+
+  if (elTotal) elTotal.textContent = String(totalFacturas);
+  if (elPend) elPend.textContent = String(totalPendientes);
+  if (elProc) elProc.textContent = String(totalProcesadas);
+  if (elMonto) elMonto.textContent = fmtMonto(String(montoPendiente), 'MXN');
+  if (badgeTab) {
+    badgeTab.textContent = String(totalPendientes);
+    badgeTab.style.display = totalPendientes > 0 ? 'inline-flex' : 'none';
+  }
+
+  // Filtrar correos y sus facturas para renderizar las tarjetas (Opción A)
+  const cardsHtml = [];
+
+  for (const correo of window.bandejaEmails) {
+    const facturasFiltradas = [];
+    (correo.facturas || []).forEach((f, idxOriginal) => {
+      if (sucursalFilter !== 'todas' && f.sucursal !== sucursalFilter) return;
+
+      if (estatusFilter === 'todos') {
+        if (f.estatus === 'descartado') return; // Ocultar descartados en vista 'Todos' a menos que se elija 'Descartados'
+      } else if (f.estatus !== estatusFilter) {
+        return;
+      }
+
+      if (search) {
+        const hay = `${correo.fromName} ${correo.fromEmail} ${correo.subject} ${f.nombreEmisor} ${f.rfcEmisor} ${f.folio} ${f.uuid} ${f.concepto}`.toLowerCase();
+        if (!hay.includes(search)) return;
+      }
+
+      facturasFiltradas.push({ f, idxOriginal });
+    });
+
+    if (facturasFiltradas.length === 0) continue;
+
+    const hasPending = facturasFiltradas.some(x => x.f.estatus === 'pendiente');
+    const allProcessed = facturasFiltradas.every(x => x.f.estatus === 'procesado');
+    const cardStateClass = hasPending ? 'has-pending' : (allProcessed ? 'all-processed' : '');
+
+    const invoicesHtml = facturasFiltradas.map(({ f, idxOriginal }) => {
+      const xmlUrl = `/api/mail/attachment/${encodeURIComponent(correo.messageId)}/${encodeURIComponent(f.xml.attachmentId)}?filename=${encodeURIComponent(f.xml.filename)}&mimeType=application/xml`;
+      const pdfChip = f.pdf
+        ? `<a href="/api/mail/attachment/${encodeURIComponent(correo.messageId)}/${encodeURIComponent(f.pdf.attachmentId)}?filename=${encodeURIComponent(f.pdf.filename)}&mimeType=application/pdf" target="_blank" class="bandeja-file-chip pdf" title="Abrir PDF de la factura en nueva pestaña">📕 ${esc(f.pdf.filename)} <span style="opacity:.75;">(👁️ Ver)</span></a>`
+        : `<span class="bandeja-file-chip" style="border-color:#fde68a; background:#fffbeb; color:#b45309; cursor:default;">⚠️ Sin PDF de factura adjunto</span>`;
+
+      let statusPill = '';
+      if (f.estatus === 'procesado') {
+        const subLbl = f.origenEstatus === 'gastos_db' ? 'En Control de Gastos' : 'Marcado Manual';
+        statusPill = `<span class="bandeja-status-pill procesado">✅ PROCESADO · ${subLbl}</span>`;
+      } else if (f.estatus === 'descartado') {
+        statusPill = `<span class="bandeja-status-pill descartado">🚫 DESCARTADO</span>`;
+      } else {
+        statusPill = `<span class="bandeja-status-pill pendiente">⏳ PENDIENTE</span>`;
+      }
+
+      const selectId = `bandeja-suc-${correo.messageId}-${idxOriginal}`;
+      const disableSuc = userRole !== 'admin' ? 'disabled' : '';
+      const sucursalSelector = `
+        <select id="${selectId}" style="padding:5px 8px; font-size:12px; border-radius:6px; border:1px solid #cbd5e1; background:#fff; color:#1e293b; font-weight:600;" ${disableSuc} title="Sucursal destino para procesar el pago">
+          <option value="Toyota Chiapas" ${f.sucursal === 'Toyota Chiapas' ? 'selected' : ''}>🏢 Oriente (Chiapas)</option>
+          <option value="Toyota Farrera Poniente" ${f.sucursal === 'Toyota Farrera Poniente' ? 'selected' : ''}>🏢 Poniente</option>
+        </select>
+      `;
+
+      let actionBtns = '';
+      if (f.estatus === 'pendiente') {
+        actionBtns = `
+          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#15803d; border-color:#86efac;" onclick="cambiarEstatusBandeja('${esc(correo.messageId)}', '${esc(f.idClave)}', '${esc(f.uuid)}', 'procesado')" title="Marcar manualmente como ya procesado">
+            ✓ Marcar Procesado
+          </button>
+          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#64748b;" onclick="cambiarEstatusBandeja('${esc(correo.messageId)}', '${esc(f.idClave)}', '${esc(f.uuid)}', 'descartado')" title="Descartar de la bandeja">
+            ✕
+          </button>
+          <button class="btn btn-primary" id="btn-proc-${correo.messageId}-${idxOriginal}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="procesarFacturaDesdeBandeja('${esc(correo.messageId)}', ${idxOriginal})">
+            ⚡ Procesar a Pago →
+          </button>
+        `;
+      } else {
+        const revertBtn = f.origenEstatus !== 'gastos_db'
+          ? `<button class="btn btn-outline" style="padding:5px 10px; font-size:11px;" onclick="cambiarEstatusBandeja('${esc(correo.messageId)}', '${esc(f.idClave)}', '${esc(f.uuid)}', 'pendiente')">↩ Volver a Pendiente</button>`
+          : '';
+        actionBtns = `
+          ${revertBtn}
+          <button class="btn btn-outline" id="btn-proc-${correo.messageId}-${idxOriginal}" style="padding:5px 12px; font-size:12px;" onclick="procesarFacturaDesdeBandeja('${esc(correo.messageId)}', ${idxOriginal})" title="Cargar de nuevo en el Flujo de Facturas">
+            ⚡ Cargar en Flujo →
+          </button>
+        `;
+      }
+
+      return `
+        <div class="bandeja-invoice-box ${f.estatus}">
+          <div class="bandeja-invoice-top">
+            <div class="bandeja-invoice-meta">
+              <span style="font-weight:700; color:#0f172a; font-size:14px;">🏢 ${esc(f.nombreEmisor)}</span>
+              <span style="font-size:12px; color:#64748b;">RFC: ${esc(f.rfcEmisor)}</span>
+              <span style="background:#e2e8f0; padding:2px 8px; border-radius:4px; font-weight:700; font-size:12px;">Folio: ${esc(f.folio)}</span>
+              <span style="font-weight:800; color:#2563eb; font-size:14px;">${fmtMonto(String(f.total), f.moneda)}</span>
+              ${f.fechaFactura ? `<span style="font-size:12px; color:#475569;">📅 Factura: ${fmtFecha(f.fechaFactura)}</span>` : ''}
+            </div>
+            <div>${statusPill}</div>
+          </div>
+
+          ${f.concepto ? `<div class="bandeja-invoice-concepto"><strong>Concepto:</strong> ${esc(f.concepto)} <span style="color:#94a3b8; font-size:11px; margin-left:6px;">(UUID: ${esc(f.uuid)})</span></div>` : `<div class="bandeja-invoice-concepto" style="color:#94a3b8;">UUID: ${esc(f.uuid)}</div>`}
+
+          <div class="bandeja-invoice-bottom">
+            <div class="bandeja-files-row">
+              <a href="${xmlUrl}" target="_blank" class="bandeja-file-chip xml" title="Ver o descargar archivo XML">📄 ${esc(f.xml.filename)}</a>
+              ${pdfChip}
+            </div>
+            <div class="bandeja-actions-row">
+              ${sucursalSelector}
+              ${actionBtns}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Sección de Documentación adicional adjunta en el mismo correo
+    let extraDocsHtml = '';
+    if (Array.isArray(correo.adjuntosExtra) && correo.adjuntosExtra.length > 0) {
+      const chips = correo.adjuntosExtra.map(att => {
+        const icon = getAttachmentIcon(att.filename);
+        const url = `/api/mail/attachment/${encodeURIComponent(correo.messageId)}/${encodeURIComponent(att.attachmentId)}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || 'application/octet-stream')}`;
+        return `<a href="${url}" target="_blank" class="bandeja-file-chip extra" title="Abrir documento adjunto en nueva pestaña">${icon} ${esc(att.filename)} <span style="opacity:.7;">(👁️ Ver)</span></a>`;
+      }).join('');
+
+      extraDocsHtml = `
+        <div class="bandeja-extra-docs">
+          <div class="bandeja-extra-title">📎 Documentación adicional adjunta en este correo (${correo.adjuntosExtra.length}):</div>
+          <div class="bandeja-files-row">${chips}</div>
+        </div>
+      `;
+    }
+
+    cardsHtml.push(`
+      <div class="bandeja-email-card ${cardStateClass}">
+        <div class="bandeja-email-header">
+          <div>
+            <div class="bandeja-sender-title">
+              <span>✉️ ${esc(correo.fromName)}</span>
+              <span class="bandeja-sender-email">&lt;${esc(correo.fromEmail)}&gt;</span>
+            </div>
+            <div class="bandeja-subject">Asunto: <strong>${esc(correo.subject)}</strong></div>
+          </div>
+          <div class="bandeja-date-badge">📅 ${fmtEmailDate(correo.fechaMs)}</div>
+        </div>
+
+        <div style="font-size:12px; font-weight:700; color:#475569; margin-bottom:8px;">
+          🧾 Facturas detectadas en este correo (${facturasFiltradas.length}):
+        </div>
+        ${invoicesHtml}
+        ${extraDocsHtml}
+      </div>
+    `);
+  }
+
+  if (cardsHtml.length === 0) {
+    const mesSel = document.getElementById('bandeja-mes');
+    const isFilteredMonth = mesSel && mesSel.value !== 'todos';
+    listEl.innerHTML = `
+      <div class="card empty-state">
+        <div class="empty-icon">📭</div>
+        <div class="empty-title">No se encontraron correos con facturas para estos filtros</div>
+        <div class="empty-sub">Prueba cambiando el mes, el estatus o limpiando el cuadro de búsqueda.</div>
+        ${isFilteredMonth ? `<button class="btn btn-outline" style="margin-top:14px;" onclick="document.getElementById('bandeja-mes').value='todos'; loadBandeja();">📅 Ver todos los meses del año</button>` : ''}
+      </div>
+    `;
+  } else {
+    listEl.innerHTML = cardsHtml.join('');
+  }
+}
+
+async function cambiarEstatusBandeja(messageId, idClave, uuid, nuevoEstatus) {
+  try {
+    const res = await fetch('/api/mail/estatus', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, idClave, uuid, estatus: nuevoEstatus })
+    });
+    const data = await res.json();
+    if (!data.ok) return alert('Error al actualizar estatus: ' + (data.error || 'Desconocido'));
+
+    // Actualizar en memoria y re-renderizar instantáneamente
+    for (const correo of window.bandejaEmails) {
+      for (const f of (correo.facturas || [])) {
+        if ((uuid && f.uuid === uuid) || (idClave && f.idClave === idClave)) {
+          f.estatus = nuevoEstatus;
+          f.origenEstatus = 'manual';
+        }
+      }
+    }
+    renderBandeja();
+  } catch (err) {
+    alert('Error de red al cambiar estatus: ' + err.message);
+  }
+}
+
+async function procesarFacturaDesdeBandeja(messageId, idxFactura) {
+  const correo = window.bandejaEmails.find(c => c.messageId === messageId);
+  if (!correo || !correo.facturas || !correo.facturas[idxFactura]) {
+    return alert('No se encontró la factura seleccionada.');
+  }
+
+  const factura = correo.facturas[idxFactura];
+  const btn = document.getElementById(`btn-proc-${messageId}-${idxFactura}`);
+  const selectEl = document.getElementById(`bandeja-suc-${messageId}-${idxFactura}`);
+  const chosenSucursalName = selectEl ? selectEl.value : (factura.sucursal || 'Toyota Chiapas');
+
+  // Mapear nombre de sucursal al Folder ID de Drive usado en #inp-sucursal
+  const folderId = chosenSucursalName.includes('Poniente')
+    ? '1HNbEOOw5sm37AfFZ1JSgKtKcAL-qqpjN'
+    : '1t-dylPS1zV54AJE2eGozKJDR4RqUtNO7';
+
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Cargando archivos...';
+  }
+
+  try {
+    // 1. Descargar XML desde Gmail
+    const xmlUrl = `/api/mail/attachment/${encodeURIComponent(messageId)}/${encodeURIComponent(factura.xml.attachmentId)}?filename=${encodeURIComponent(factura.xml.filename)}&mimeType=application/xml`;
+    const xmlRes = await fetch(xmlUrl);
+    if (!xmlRes.ok) throw new Error('No se pudo descargar el archivo XML del correo.');
+    const xmlBlob = await xmlRes.blob();
+    const xmlFile = new File([xmlBlob], factura.xml.filename, { type: 'text/xml' });
+
+    // 2. Descargar PDF desde Gmail (si viene adjunto en el correo)
+    let pdfFile = null;
+    if (factura.pdf && factura.pdf.attachmentId) {
+      const pdfUrl = `/api/mail/attachment/${encodeURIComponent(messageId)}/${encodeURIComponent(factura.pdf.attachmentId)}?filename=${encodeURIComponent(factura.pdf.filename)}&mimeType=application/pdf`;
+      const pdfRes = await fetch(pdfUrl);
+      if (pdfRes.ok) {
+        const pdfBlob = await pdfRes.blob();
+        pdfFile = new File([pdfBlob], factura.pdf.filename, { type: 'application/pdf' });
+      }
+    }
+
+    // 3. Limpiar flujo anterior y cargar archivos en memoria
+    resetFlow();
+
+    state.xmlFile = xmlFile;
+    document.getElementById('name-xml').textContent = xmlFile.name;
+    document.getElementById('tag-xml').classList.add('show');
+
+    if (pdfFile) {
+      state.pdfFile = pdfFile;
+      document.getElementById('name-pdf').textContent = pdfFile.name;
+      document.getElementById('tag-pdf').classList.add('show');
+    }
+
+    // 4. Ajustar sucursal destino
+    const inpSuc = document.getElementById('inp-sucursal');
+    if (inpSuc) {
+      inpSuc.value = folderId;
+      state.sucursalFolderId = folderId;
+    }
+
+    // 5. Cambiar a la pestaña de Flujo de Facturas
+    switchMainView('facturas');
+
+    // 6. Si tenemos ambos archivos (XML + PDF), avanzar directo al Paso 2 (Validación SAT)
+    if (state.xmlFile && state.pdfFile) {
+      goStep1();
+    } else {
+      showErr('err-step0', 'Se cargó el XML desde el correo, pero este correo no traía el PDF de la factura. Selecciona el PDF manualmente para continuar.');
+    }
+  } catch (err) {
+    alert('Error al cargar factura desde el correo: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
   }
 }
 
@@ -1575,10 +2010,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (selAnio) selAnio.value = String(currentYear);
   if (selMes) selMes.value = currentMonth;
 
+  const bandAnio = document.getElementById('bandeja-anio');
+  if (bandAnio) bandAnio.value = String(currentYear);
+
   applyRoleRestrictions();
 
   checkGoogleAuth();
   populateCategorias();
+  loadBandeja();
   loadGastos();
   loadProveedores();
 });

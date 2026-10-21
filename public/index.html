@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Gestor de Facturas — Farrera Autotec</title>
   <meta name="description" content="Flujo completo de procesamiento de facturas: SAT, Drive, Autotec, Mail, Contrarecibo y Control de Gastos."/>
-  <link rel="stylesheet" href="styles.css?v=v3"/>
+  <link rel="stylesheet" href="styles.css?v=v4"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -35,7 +35,10 @@
 
   <!-- Main Navigation Tabs -->
   <div class="main-tabs" id="main-tabs">
-    <button class="main-tab active" data-view="facturas" onclick="switchMainView('facturas')">
+    <button class="main-tab active" data-view="bandeja" onclick="switchMainView('bandeja')">
+      📥 Bandeja de Entrada <span id="bandeja-badge-pendientes" class="bandeja-tab-badge" style="display:none;">0</span>
+    </button>
+    <button class="main-tab" data-view="facturas" onclick="switchMainView('facturas')">
       🧾 Flujo de Facturas
     </button>
     <button class="main-tab" data-view="gastos" onclick="switchMainView('gastos')">
@@ -44,9 +47,132 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       VIEW: BANDEJA DE ENTRADA (PRE-PASO)
+  ═══════════════════════════════════════════ -->
+  <div class="main-view active" id="view-bandeja">
+
+    <!-- Aviso de autorización de Gmail -->
+    <div id="bandeja-auth-banner" class="card" style="display:none; border: 2px solid #f59e0b; background: #fffbeb; margin-bottom: 20px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;">
+        <div>
+          <div style="font-size:16px; font-weight:700; color:#b45309; margin-bottom:4px;">
+            🔐 Conecta tu Bandeja de Gmail (1 clic)
+          </div>
+          <p style="font-size:13px; color:#78350f; margin:0;">
+            Autoriza por única vez el permiso de lectura de correos para que tus facturas (<code>.xml</code> y <code>.pdf</code>) junto con su documentación adjunta lleguen directo aquí.
+          </p>
+        </div>
+        <button class="btn btn-primary" onclick="authGoogle()" style="background:#d97706; border-color:#d97706; white-space:nowrap;">
+          🔗 Autorizar Lectura de Gmail
+        </button>
+      </div>
+    </div>
+
+    <!-- Tarjetas de Resumen (KPIs Bandeja) -->
+    <div class="stats-row" style="margin-bottom: 18px;">
+      <div class="stat-card">
+        <div class="stat-icon">📬</div>
+        <div class="stat-info">
+          <div class="stat-val" id="bandeja-stat-total">0</div>
+          <div class="stat-lbl">Facturas en Bandeja</div>
+        </div>
+      </div>
+      <div class="stat-card stat-proceso">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-info">
+          <div class="stat-val" id="bandeja-stat-pendientes">0</div>
+          <div class="stat-lbl">Pendientes por Procesar</div>
+        </div>
+      </div>
+      <div class="stat-card stat-pagado">
+        <div class="stat-icon">✅</div>
+        <div class="stat-info">
+          <div class="stat-val" id="bandeja-stat-procesadas">0</div>
+          <div class="stat-lbl">Ya Procesadas a Pago</div>
+        </div>
+      </div>
+      <div class="stat-card stat-monto">
+        <div class="stat-icon">💰</div>
+        <div class="stat-info">
+          <div class="stat-val" id="bandeja-stat-monto">$0.00</div>
+          <div class="stat-lbl">Monto Pendiente</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Barra de Filtros -->
+    <div class="card" style="padding: 18px; margin-bottom: 20px;">
+      <div class="gastos-toolbar" style="margin-bottom:0;">
+        <div class="gastos-filters" style="width:100%;">
+          <div class="field" style="margin:0; flex:2; min-width:220px;">
+            <label style="font-size:11px;">Buscar Proveedor / Folio / Asunto / UUID</label>
+            <input type="text" id="bandeja-search" placeholder="🔍 Escribe proveedor, folio o concepto..." oninput="renderBandeja()" style="padding:8px 12px; font-size:13px;" />
+          </div>
+          <div class="field" style="margin:0; min-width:110px;">
+            <label style="font-size:11px;">Año</label>
+            <select id="bandeja-anio" onchange="loadBandeja()">
+              <option value="todos">Todos</option>
+              <option value="2026" selected>2026</option>
+              <option value="2025">2025</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0; min-width:130px;">
+            <label style="font-size:11px;">Mes</label>
+            <select id="bandeja-mes" onchange="loadBandeja()">
+              <option value="todos">Todos</option>
+              <option value="01">Enero</option>
+              <option value="02">Febrero</option>
+              <option value="03">Marzo</option>
+              <option value="04">Abril</option>
+              <option value="05">Mayo</option>
+              <option value="06">Junio</option>
+              <option value="07">Julio</option>
+              <option value="08">Agosto</option>
+              <option value="09">Septiembre</option>
+              <option value="10">Octubre</option>
+              <option value="11">Noviembre</option>
+              <option value="12">Diciembre</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0; min-width:150px;">
+            <label style="font-size:11px;">Estatus</label>
+            <select id="bandeja-estatus" onchange="renderBandeja()">
+              <option value="todos">Todos</option>
+              <option value="pendiente">⏳ Pendientes</option>
+              <option value="procesado">✅ Procesados</option>
+              <option value="descartado">🚫 Descartados</option>
+            </select>
+          </div>
+          <div class="field" id="field-bandeja-sucursal" style="margin:0; min-width:160px;">
+            <label style="font-size:11px;">Sucursal</label>
+            <select id="bandeja-sucursal" onchange="renderBandeja()">
+              <option value="todas">Todas</option>
+              <option value="Toyota Chiapas">Oriente (Chiapas)</option>
+              <option value="Toyota Farrera Poniente">Poniente</option>
+            </select>
+          </div>
+          <div style="display:flex; align-items:flex-end;">
+            <button class="btn btn-primary" id="btn-refresh-bandeja" onclick="loadBandeja(true)" style="padding:9px 16px; font-size:13px; white-space:nowrap;">
+              <span class="spinner" id="spin-bandeja"></span> 🔄 Actualizar Correos
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contenedor de Tarjetas de Correo -->
+    <div id="bandeja-list">
+      <div class="card" style="text-align:center; padding:40px; color:#64748b;">
+        ⏳ Cargando correos con facturas desde tu bandeja...
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════
        VIEW: FACTURAS
   ═══════════════════════════════════════════ -->
-  <div class="main-view active" id="view-facturas">
+  <div class="main-view" id="view-facturas">
 
     <!-- Config warning -->
     <div id="config-banner" class="hidden">
@@ -628,6 +754,6 @@
 <!-- ══ Scripts ══════════════════ -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="app.js?v=v3"></script>
+<script src="app.js?v=v4"></script>
 </body>
 </html>
