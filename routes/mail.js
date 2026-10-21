@@ -7,10 +7,10 @@ const router = express.Router();
 const { getAuthorizedClient, getGoogle } = require('./drive');
 const { getDB, getGestorRole, backupDatabaseToDrive } = require('./gastos');
 
-// ── Descompresor ZIP en Memoria (Nativo con zlib) ─────────
-function extractZipBuffer(zipBuf) {
+// ── Descompresor ZIP en Memoria (Nativo con zlib + Soporte Recursivo ZIP dentro de ZIP) ──
+function extractZipBuffer(zipBuf, depth = 0, parentPath = '') {
   const entries = [];
-  if (!Buffer.isBuffer(zipBuf) || zipBuf.length < 22) return entries;
+  if (!Buffer.isBuffer(zipBuf) || zipBuf.length < 22 || depth > 3) return entries;
 
   try {
     // Buscar End of Central Directory (0x06054b50) desde el final
@@ -67,6 +67,17 @@ function extractZipBuffer(zipBuf) {
       }
 
       if (fileBuffer) {
+        const fullEntryPath = parentPath ? `${parentPath}::>${entryPath}` : entryPath;
+
+        // Si dentro del ZIP viene otro ZIP (ej. ZIP del SAT dentro de carpeta comprimida), descomprimirlo recursivamente
+        if (/\.zip$/i.test(baseName) && depth < 3) {
+          const nestedEntries = extractZipBuffer(fileBuffer, depth + 1, fullEntryPath);
+          for (const ne of nestedEntries) {
+            entries.push(ne);
+          }
+          continue;
+        }
+
         let mimeType = 'application/octet-stream';
         if (/\.pdf$/i.test(baseName)) mimeType = 'application/pdf';
         else if (/\.xml$/i.test(baseName)) mimeType = 'application/xml';
@@ -74,7 +85,7 @@ function extractZipBuffer(zipBuf) {
         else if (/\.jpe?g$/i.test(baseName)) mimeType = 'image/jpeg';
 
         entries.push({
-          entryPath,
+          entryPath: fullEntryPath,
           filename: baseName,
           mimeType,
           size: uncompressedSize || fileBuffer.length,
@@ -125,16 +136,15 @@ function extractPartsRecursive(payload, list = [], partPath = '0') {
   const size = payload.body?.size || 0;
 
   if (filename) {
-    // Filtrar logos/iconos diminutos de firma incrustados en el cuerpo del correo
-    const isTinyInlineSignature =
-      contentId &&
-      disposition.includes('inline') &&
-      size > 0 &&
-      size < 12000 &&
+    // Filtrar logos/iconos de firma de correo (ej. Firma-Chiapas-Yoni Ruiz.png, image001.png, outlook, etc.)
+    const isSignatureImage =
       /\.(png|gif|jpg|jpeg)$/i.test(filename) &&
-      /^(image\d+|outlook|logo|firma|banner|icon)/i.test(filename);
+      (
+        /^firma/i.test(filename) ||
+        (contentId && disposition.includes('inline') && size > 0 && size < 25000 && /^(image\d+|outlook|logo|firma|banner|icon)/i.test(filename))
+      );
 
-    if (!isTinyInlineSignature) {
+    if (!isSignatureImage) {
       list.push({
         filename,
         mimeType: payload.mimeType || 'application/octet-stream',
@@ -479,7 +489,7 @@ router.get('/inbox', async (req, res) => {
           const cached = getCacheStmt.get(m.id);
           if (cached && cached.data_json) {
             const parsedCache = JSON.parse(cached.data_json);
-            if (parsedCache && parsedCache.cacheVer === 2) {
+            if (parsedCache && parsedCache.cacheVer === 3) {
               if (parsedCache.noInvoice) return null;
               if (Array.isArray(parsedCache.facturas) && parsedCache.facturas.length > 0) {
                 return parsedCache;
@@ -502,16 +512,30 @@ router.get('/inbox', async (req, res) => {
           const fechaCorreoIso = new Date(internalDateMs).toISOString();
           const sender = parseSender(fromRaw);
 
-          const rawParts = extractPartsRecursive(msgData.payload);
-          const allParts = [];
+          const rawPartsAll = extractPartsRecursive(msgData.payload);
+          const seenRawKeys = new Set();
+          const rawParts = [];
+          for (const rp of rawPartsAll) {
+            const rKey = `${(rp.filename || '').toLowerCase()}::${rp.size || 0}`;
+            if (!seenRawKeys.has(rKey)) {
+              seenRawKeys.add(rKey);
+              rawParts.push(rp);
+            }
+          }
 
-          // Si hay archivos .zip adjuntos, descomprimirlos automáticamente en memoria
+          const allParts = [];
+          const seenExtractedKeys = new Set();
+
+          // Si hay archivos .zip adjuntos, descomprimirlos automáticamente en memoria (incluyendo ZIPs anidados)
           for (const p of rawParts) {
             if (/\.zip$/i.test(p.filename)) {
               const zipBuf = await fetchAttachmentBuffer(gmail, m.id, p);
               if (zipBuf) {
                 const zipEntries = extractZipBuffer(zipBuf);
                 for (const entry of zipEntries) {
+                  const eKey = `${(entry.filename || '').toLowerCase()}::${entry.size || 0}`;
+                  if (seenExtractedKeys.has(eKey)) continue;
+                  seenExtractedKeys.add(eKey);
                   allParts.push({
                     filename: entry.filename,
                     mimeType: entry.mimeType,
@@ -523,7 +547,11 @@ router.get('/inbox', async (req, res) => {
                 }
               }
             } else {
-              allParts.push(p);
+              const eKey = `${(p.filename || '').toLowerCase()}::${p.size || 0}`;
+              if (!seenExtractedKeys.has(eKey)) {
+                seenExtractedKeys.add(eKey);
+                allParts.push(p);
+              }
             }
           }
 
@@ -533,7 +561,7 @@ router.get('/inbox', async (req, res) => {
 
           if (xmlParts.length === 0) {
             try {
-              setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 2, messageId: m.id, noInvoice: true, facturas: [] }));
+              setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 3, messageId: m.id, noInvoice: true, facturas: [] }));
             } catch (e) {}
             return null;
           }
@@ -556,7 +584,7 @@ router.get('/inbox', async (req, res) => {
           if (facturas.length === 0) return null;
 
           const emailItem = {
-            cacheVer: 2,
+            cacheVer: 3,
             messageId: m.id,
             threadId: msgData.threadId,
             subject,
