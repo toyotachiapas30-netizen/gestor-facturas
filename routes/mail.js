@@ -56,11 +56,16 @@ function extractZipBuffer(zipBuf, depth = 0, parentPath = '') {
       const localNameLen = zipBuf.readUInt16LE(localHeaderOffset + 26);
       const localExtraLen = zipBuf.readUInt16LE(localHeaderOffset + 28);
       const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
-      if (dataStart + compressedSize > zipBuf.length) continue;
+      if (dataStart >= zipBuf.length) continue;
 
-      const compSlice = zipBuf.subarray(dataStart, dataStart + compressedSize);
+      // Soportar ZIP64 del portal del SAT (donde compressedSize = 0xFFFFFFFF)
+      const isZip64OrStream = compressedSize === 0xFFFFFFFF || (dataStart + compressedSize > zipBuf.length);
+      const compSlice = isZip64OrStream
+        ? zipBuf.subarray(dataStart)
+        : zipBuf.subarray(dataStart, dataStart + compressedSize);
+
       let fileBuffer = null;
-      if (compressionMethod === 0) {
+      if (compressionMethod === 0 && !isZip64OrStream) {
         fileBuffer = Buffer.from(compSlice);
       } else if (compressionMethod === 8) {
         fileBuffer = zlib.inflateRawSync(compSlice);
@@ -68,6 +73,7 @@ function extractZipBuffer(zipBuf, depth = 0, parentPath = '') {
 
       if (fileBuffer) {
         const fullEntryPath = parentPath ? `${parentPath}::>${entryPath}` : entryPath;
+        const realSize = (uncompressedSize && uncompressedSize !== 0xFFFFFFFF) ? uncompressedSize : fileBuffer.length;
 
         // Si dentro del ZIP viene otro ZIP (ej. ZIP del SAT dentro de carpeta comprimida), descomprimirlo recursivamente
         if (/\.zip$/i.test(baseName) && depth < 3) {
@@ -88,7 +94,7 @@ function extractZipBuffer(zipBuf, depth = 0, parentPath = '') {
           entryPath: fullEntryPath,
           filename: baseName,
           mimeType,
-          size: uncompressedSize || fileBuffer.length,
+          size: realSize,
           buffer: fileBuffer
         });
       }
@@ -489,7 +495,7 @@ router.get('/inbox', async (req, res) => {
           const cached = getCacheStmt.get(m.id);
           if (cached && cached.data_json) {
             const parsedCache = JSON.parse(cached.data_json);
-            if (parsedCache && parsedCache.cacheVer === 3) {
+            if (parsedCache && parsedCache.cacheVer === 4) {
               if (parsedCache.noInvoice) return null;
               if (Array.isArray(parsedCache.facturas) && parsedCache.facturas.length > 0) {
                 return parsedCache;
@@ -561,7 +567,7 @@ router.get('/inbox', async (req, res) => {
 
           if (xmlParts.length === 0) {
             try {
-              setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 3, messageId: m.id, noInvoice: true, facturas: [] }));
+              setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 4, messageId: m.id, noInvoice: true, facturas: [] }));
             } catch (e) {}
             return null;
           }
@@ -584,7 +590,7 @@ router.get('/inbox', async (req, res) => {
           if (facturas.length === 0) return null;
 
           const emailItem = {
-            cacheVer: 3,
+            cacheVer: 4,
             messageId: m.id,
             threadId: msgData.threadId,
             subject,
