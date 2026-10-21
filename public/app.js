@@ -1910,6 +1910,16 @@ function renderBandeja() {
       `;
     }
 
+    // Contabilizar cuántos archivos totales tiene el correo (XML + PDFs + Adjuntos adicionales)
+    let totalArchivosCorreo = 0;
+    (correo.facturas || []).forEach(f => {
+      if (f.xml && f.xml.attachmentId) totalArchivosCorreo++;
+      if (f.pdf && f.pdf.attachmentId) totalArchivosCorreo++;
+    });
+    if (Array.isArray(correo.adjuntosExtra)) {
+      totalArchivosCorreo += correo.adjuntosExtra.length;
+    }
+
     cardsHtml.push(`
       <div class="bandeja-email-card ${cardStateClass}">
         <div class="bandeja-email-header">
@@ -1920,7 +1930,12 @@ function renderBandeja() {
             </div>
             <div class="bandeja-subject">Asunto: <strong>${esc(correo.subject)}</strong></div>
           </div>
-          <div class="bandeja-date-badge">📅 ${fmtEmailDate(correo.fechaMs)}</div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-outline" id="btn-dl-all-${correo.messageId}" onclick="descargarTodosArchivosCorreo('${esc(correo.messageId)}')" style="padding:5px 12px; font-size:12px; font-weight:700; color:#1d4ed8; border-color:#93c5fd; background:#eff6ff; display:inline-flex; align-items:center; gap:6px;" title="Descargar XML, PDF de factura y todos los anexos de este correo a tu carpeta de Descargas">
+              ⬇️ Descargar Todo (${totalArchivosCorreo})
+            </button>
+            <div class="bandeja-date-badge">📅 ${fmtEmailDate(correo.fechaMs)}</div>
+          </div>
         </div>
 
         <div style="font-size:12px; font-weight:700; color:#475569; margin-bottom:8px;">
@@ -1945,6 +1960,85 @@ function renderBandeja() {
     `;
   } else {
     listEl.innerHTML = cardsHtml.join('');
+  }
+}
+
+async function descargarTodosArchivosCorreo(messageId) {
+  const correo = window.bandejaEmails.find(c => c.messageId === messageId);
+  if (!correo) return;
+
+  const archivos = [];
+  (correo.facturas || []).forEach(f => {
+    if (f.xml && f.xml.attachmentId) {
+      archivos.push({
+        filename: f.xml.filename,
+        attachmentId: f.xml.attachmentId,
+        mimeType: f.xml.mimeType || 'application/xml'
+      });
+    }
+    if (f.pdf && f.pdf.attachmentId) {
+      archivos.push({
+        filename: f.pdf.filename,
+        attachmentId: f.pdf.attachmentId,
+        mimeType: f.pdf.mimeType || 'application/pdf'
+      });
+    }
+  });
+
+  if (Array.isArray(correo.adjuntosExtra)) {
+    correo.adjuntosExtra.forEach(att => {
+      if (att && att.attachmentId) {
+        archivos.push({
+          filename: att.filename,
+          attachmentId: att.attachmentId,
+          mimeType: att.mimeType || 'application/octet-stream'
+        });
+      }
+    });
+  }
+
+  if (archivos.length === 0) return alert('No hay archivos para descargar en este correo.');
+
+  const btn = document.getElementById(`btn-dl-all-${messageId}`);
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) btn.disabled = true;
+
+  try {
+    for (let i = 0; i < archivos.length; i++) {
+      const item = archivos[i];
+      if (btn) btn.innerHTML = `⏳ Descargando ${i + 1}/${archivos.length}...`;
+
+      const url = `/api/mail/attachment/${encodeURIComponent(messageId)}/${encodeURIComponent(item.attachmentId)}?filename=${encodeURIComponent(item.filename)}&mimeType=${encodeURIComponent(item.mimeType)}&download=1`;
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = item.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+      // Pequeña pausa entre descargas para que el navegador permita bajar todos los archivos sueltos
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    if (btn) {
+      btn.innerHTML = `✅ Descargados (${archivos.length})`;
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+      }, 2200);
+    }
+  } catch (err) {
+    alert('Error al descargar archivos: ' + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
   }
 }
 
