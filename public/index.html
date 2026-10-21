@@ -69,34 +69,22 @@
     </div>
 
     <!-- Tarjetas de Resumen (KPIs Bandeja) -->
-    <div class="stats-row" style="margin-bottom: 18px;">
-      <div class="stat-card">
-        <div class="stat-icon">📬</div>
-        <div class="stat-info">
-          <div class="stat-val" id="bandeja-stat-total">0</div>
-          <div class="stat-lbl">Facturas en Bandeja</div>
-        </div>
+    <div class="gastos-summary" style="margin-bottom: 18px;">
+      <div class="summary-card">
+        <div class="sc-label">📬 Facturas en Bandeja</div>
+        <div class="sc-value" id="bandeja-stat-total">0</div>
       </div>
-      <div class="stat-card stat-proceso">
-        <div class="stat-icon">⏳</div>
-        <div class="stat-info">
-          <div class="stat-val" id="bandeja-stat-pendientes">0</div>
-          <div class="stat-lbl">Pendientes por Procesar</div>
-        </div>
+      <div class="summary-card">
+        <div class="sc-label">⏳ Pendientes por Procesar</div>
+        <div class="sc-value yellow" id="bandeja-stat-pendientes">0</div>
       </div>
-      <div class="stat-card stat-pagado">
-        <div class="stat-icon">✅</div>
-        <div class="stat-info">
-          <div class="stat-val" id="bandeja-stat-procesadas">0</div>
-          <div class="stat-lbl">Ya Procesadas a Pago</div>
-        </div>
+      <div class="summary-card">
+        <div class="sc-label">✅ Ya Procesadas a Pago</div>
+        <div class="sc-value green" id="bandeja-stat-procesadas">0</div>
       </div>
-      <div class="stat-card stat-monto">
-        <div class="stat-icon">💰</div>
-        <div class="stat-info">
-          <div class="stat-val" id="bandeja-stat-monto">$0.00</div>
-          <div class="stat-lbl">Monto Pendiente</div>
-        </div>
+      <div class="summary-card">
+        <div class="sc-label">💰 Monto Pendiente</div>
+        <div class="sc-value blue" id="bandeja-stat-monto">$0.00</div>
       </div>
     </div>
 
@@ -754,6 +742,6 @@
 <!-- ══ Scripts ══════════════════ -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="app.js?v=v6"></script>
+<script src="app.js?v=v7"></script>
 </body>
 </html>

@@ -1620,6 +1620,15 @@ function applyRoleRestrictions() {
 window.bandejaEmails = [];
 let bandejaLoading = false;
 
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function getAttachmentIcon(filename = '') {
   const lower = filename.toLowerCase();
   if (lower.endsWith('.pdf')) return '📑';
