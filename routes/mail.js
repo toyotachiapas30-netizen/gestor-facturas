@@ -1,9 +1,93 @@
 const express = require('express');
 const { execSync } = require('child_process');
+const zlib = require('zlib');
+const path = require('path');
 const xml2js = require('xml2js');
 const router = express.Router();
 const { getAuthorizedClient, getGoogle } = require('./drive');
 const { getDB, getGestorRole, backupDatabaseToDrive } = require('./gastos');
+
+// ── Descompresor ZIP en Memoria (Nativo con zlib) ─────────
+function extractZipBuffer(zipBuf) {
+  const entries = [];
+  if (!Buffer.isBuffer(zipBuf) || zipBuf.length < 22) return entries;
+
+  try {
+    // Buscar End of Central Directory (0x06054b50) desde el final
+    let eocdOffset = -1;
+    const minOffset = Math.max(0, zipBuf.length - 65557);
+    for (let i = zipBuf.length - 22; i >= minOffset; i--) {
+      if (zipBuf.readUInt32LE(i) === 0x06054b50) {
+        eocdOffset = i;
+        break;
+      }
+    }
+    if (eocdOffset === -1) return entries;
+
+    const totalEntries = zipBuf.readUInt16LE(eocdOffset + 10);
+    let cdPos = zipBuf.readUInt32LE(eocdOffset + 16);
+
+    for (let e = 0; e < totalEntries; e++) {
+      if (cdPos + 46 > zipBuf.length) break;
+      if (zipBuf.readUInt32LE(cdPos) !== 0x02014b50) break;
+
+      const compressionMethod = zipBuf.readUInt16LE(cdPos + 10);
+      const compressedSize = zipBuf.readUInt32LE(cdPos + 20);
+      const uncompressedSize = zipBuf.readUInt32LE(cdPos + 24);
+      const fileNameLen = zipBuf.readUInt16LE(cdPos + 28);
+      const extraLen = zipBuf.readUInt16LE(cdPos + 30);
+      const commentLen = zipBuf.readUInt16LE(cdPos + 32);
+      const localHeaderOffset = zipBuf.readUInt32LE(cdPos + 42);
+
+      const entryPath = zipBuf.subarray(cdPos + 46, cdPos + 46 + fileNameLen).toString('utf8');
+      cdPos += 46 + fileNameLen + extraLen + commentLen;
+
+      // Ignorar carpetas y metadatos de macOS/Windows
+      if (!entryPath || entryPath.endsWith('/') || entryPath.includes('__MACOSX') || entryPath.endsWith('.DS_Store')) {
+        continue;
+      }
+
+      const baseName = path.posix.basename(entryPath.replace(/\\/g, '/')).trim();
+      if (!baseName || baseName.startsWith('._')) continue;
+
+      if (localHeaderOffset + 30 > zipBuf.length) continue;
+      if (zipBuf.readUInt32LE(localHeaderOffset) !== 0x04034b50) continue;
+
+      const localNameLen = zipBuf.readUInt16LE(localHeaderOffset + 26);
+      const localExtraLen = zipBuf.readUInt16LE(localHeaderOffset + 28);
+      const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+      if (dataStart + compressedSize > zipBuf.length) continue;
+
+      const compSlice = zipBuf.subarray(dataStart, dataStart + compressedSize);
+      let fileBuffer = null;
+      if (compressionMethod === 0) {
+        fileBuffer = Buffer.from(compSlice);
+      } else if (compressionMethod === 8) {
+        fileBuffer = zlib.inflateRawSync(compSlice);
+      }
+
+      if (fileBuffer) {
+        let mimeType = 'application/octet-stream';
+        if (/\.pdf$/i.test(baseName)) mimeType = 'application/pdf';
+        else if (/\.xml$/i.test(baseName)) mimeType = 'application/xml';
+        else if (/\.png$/i.test(baseName)) mimeType = 'image/png';
+        else if (/\.jpe?g$/i.test(baseName)) mimeType = 'image/jpeg';
+
+        entries.push({
+          entryPath,
+          filename: baseName,
+          mimeType,
+          size: uncompressedSize || fileBuffer.length,
+          buffer: fileBuffer
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Error descomprimiendo ZIP en memoria:', err.message);
+  }
+
+  return entries;
+}
 
 // ── Helpers para Gmail & CFDI ──────────────────────────────
 
@@ -312,8 +396,8 @@ router.get('/inbox', async (req, res) => {
     const { mes = 'todos', anio = 'todos', limit = '35' } = req.query;
     const maxResults = Math.min(Math.max(parseInt(limit, 10) || 35, 5), 60);
 
-    // Construir filtro de búsqueda para Gmail (excluyendo Google Payments)
-    let gmailQuery = 'has:attachment filename:xml -from:payments-noreply@google.com -"Google Payments"';
+    // Construir filtro de búsqueda para Gmail (incluyendo XML sueltos y archivos ZIP, excluyendo Google Payments)
+    let gmailQuery = 'has:attachment (filename:xml OR filename:zip) -from:payments-noreply@google.com -"Google Payments"';
     if (anio && anio !== 'todos') {
       const y = parseInt(anio, 10);
       if (!isNaN(y)) {
@@ -395,8 +479,11 @@ router.get('/inbox', async (req, res) => {
           const cached = getCacheStmt.get(m.id);
           if (cached && cached.data_json) {
             const parsedCache = JSON.parse(cached.data_json);
-            if (parsedCache && Array.isArray(parsedCache.facturas) && parsedCache.facturas.length > 0) {
-              return parsedCache;
+            if (parsedCache && parsedCache.cacheVer === 2) {
+              if (parsedCache.noInvoice) return null;
+              if (Array.isArray(parsedCache.facturas) && parsedCache.facturas.length > 0) {
+                return parsedCache;
+              }
             }
           }
 
@@ -415,17 +502,46 @@ router.get('/inbox', async (req, res) => {
           const fechaCorreoIso = new Date(internalDateMs).toISOString();
           const sender = parseSender(fromRaw);
 
-          const allParts = extractPartsRecursive(msgData.payload);
+          const rawParts = extractPartsRecursive(msgData.payload);
+          const allParts = [];
+
+          // Si hay archivos .zip adjuntos, descomprimirlos automáticamente en memoria
+          for (const p of rawParts) {
+            if (/\.zip$/i.test(p.filename)) {
+              const zipBuf = await fetchAttachmentBuffer(gmail, m.id, p);
+              if (zipBuf) {
+                const zipEntries = extractZipBuffer(zipBuf);
+                for (const entry of zipEntries) {
+                  allParts.push({
+                    filename: entry.filename,
+                    mimeType: entry.mimeType,
+                    attachmentId: `ZIP_${p.attachmentId}:::${encodeURIComponent(entry.entryPath)}`,
+                    preloadedBuffer: entry.buffer,
+                    size: entry.size,
+                    fromZip: p.filename
+                  });
+                }
+              }
+            } else {
+              allParts.push(p);
+            }
+          }
+
           const xmlParts = allParts.filter(p => /\.xml$/i.test(p.filename));
           const pdfParts = allParts.filter(p => /\.pdf$/i.test(p.filename));
           const otherParts = allParts.filter(p => !/\.xml$/i.test(p.filename) && !/\.pdf$/i.test(p.filename));
 
-          if (xmlParts.length === 0) return null;
+          if (xmlParts.length === 0) {
+            try {
+              setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 2, messageId: m.id, noInvoice: true, facturas: [] }));
+            } catch (e) {}
+            return null;
+          }
 
-          // Descargar y parsear cada XML adjunto
+          // Descargar y parsear cada XML adjunto (o usar buffer ya descomprimido del ZIP)
           const xmlItems = [];
           for (const xp of xmlParts) {
-            const buf = await fetchAttachmentBuffer(gmail, m.id, xp);
+            const buf = xp.preloadedBuffer || await fetchAttachmentBuffer(gmail, m.id, xp);
             const cfdi = buf ? await parseCFDIXmlBuffer(buf) : null;
             const sucursal = detectSucursal(cfdi, subject, toRaw, msgData.snippet);
             xmlItems.push({
@@ -440,6 +556,7 @@ router.get('/inbox', async (req, res) => {
           if (facturas.length === 0) return null;
 
           const emailItem = {
+            cacheVer: 2,
             messageId: m.id,
             threadId: msgData.threadId,
             subject,
@@ -576,7 +693,40 @@ router.get('/attachment/:messageId/:attachmentId', async (req, res) => {
 
     let buffer = null;
 
-    if (attachmentId.startsWith('INLINE_')) {
+    if (attachmentId.startsWith('ZIP_')) {
+      // Archivo extraído de un .ZIP adjunto: ZIP_<zipAttId>:::<encodedEntryPath>
+      const rawZipSpec = attachmentId.slice(4);
+      const sepIdx = rawZipSpec.indexOf(':::');
+      if (sepIdx !== -1) {
+        const zipAttId = rawZipSpec.slice(0, sepIdx);
+        const targetEntryPath = decodeURIComponent(rawZipSpec.slice(sepIdx + 3));
+        let zipBuf = null;
+        if (zipAttId.startsWith('INLINE_')) {
+          const partPath = zipAttId.replace(/^INLINE_/, '');
+          const msgRes = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
+          const part = findInlinePartByPath(msgRes.data.payload, partPath);
+          if (part && part.body && part.body.data) {
+            zipBuf = Buffer.from(part.body.data, 'base64');
+          }
+        } else {
+          const attRes = await gmail.users.messages.attachments.get({
+            userId: 'me',
+            messageId,
+            id: zipAttId
+          });
+          if (attRes?.data?.data) {
+            zipBuf = Buffer.from(attRes.data.data, 'base64');
+          }
+        }
+        if (zipBuf) {
+          const entries = extractZipBuffer(zipBuf);
+          const foundEntry = entries.find(e => e.entryPath === targetEntryPath || e.filename === filename);
+          if (foundEntry) {
+            buffer = foundEntry.buffer;
+          }
+        }
+      }
+    } else if (attachmentId.startsWith('INLINE_')) {
       const partPath = attachmentId.replace(/^INLINE_/, '');
       const msgRes = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
       const part = findInlinePartByPath(msgRes.data.payload, partPath);
