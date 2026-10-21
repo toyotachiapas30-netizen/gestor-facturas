@@ -1618,7 +1618,52 @@ function applyRoleRestrictions() {
 
 // ── BANDEJA DE ENTRADA (GMAIL PRE-PASO A PAGO) ────────────────────────────────
 window.bandejaEmails = [];
+window.bandejaNewIds = new Set();
 let bandejaLoading = false;
+let bandejaLastSignature = '';
+
+function getBandejaSignature(correos) {
+  return (correos || []).map(c => {
+    const fStr = (c.facturas || []).map(f => `${f.idClave || f.uuid}:${f.estatus}:${f.sucursal}`).join(',');
+    const aStr = (c.adjuntosExtra || []).length;
+    return `${c.messageId}[${fStr}|${aStr}]`;
+  }).join('||');
+}
+
+function showBandejaToast(nuevosCorreos) {
+  if (!Array.isArray(nuevosCorreos) || nuevosCorreos.length === 0) return;
+  let container = document.getElementById('bandeja-toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'bandeja-toast-container';
+    container.style.cssText = 'position:fixed; bottom:22px; right:22px; z-index:99999; display:flex; flex-direction:column; gap:10px; max-width:380px;';
+    document.body.appendChild(container);
+  }
+
+  nuevosCorreos.forEach(c => {
+    const primera = (c.facturas && c.facturas[0]) || {};
+    const emisor = primera.nombreEmisor || c.fromName || 'Proveedor';
+    const monto = primera.total ? fmtMonto(String(primera.total), primera.moneda || 'MXN') : '';
+    const toast = document.createElement('div');
+    toast.style.cssText = 'background:#0f172a; color:#f8fafc; padding:14px 16px; border-radius:12px; border-left:4px solid #10b981; box-shadow:0 12px 28px rgba(0,0,0,0.28); font-size:13px; cursor:pointer; transition:all .25s ease;';
+    toast.innerHTML = `
+      <div style="font-weight:800; color:#34d399; margin-bottom:4px; display:flex; align-items:center; justify-content:space-between;">
+        <span>📬 Nueva factura en Bandeja</span>
+        <span style="font-size:11px; color:#94a3b8;">Ahora</span>
+      </div>
+      <div style="font-weight:700; color:#fff; margin-bottom:2px;">${esc(emisor)} ${monto ? `<span style="color:#60a5fa;">(${esc(monto)})</span>` : ''}</div>
+      <div style="font-size:11px; color:#cbd5e1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Asunto: ${esc(c.subject || '')}</div>
+    `;
+    toast.onclick = () => {
+      switchMainView('bandeja');
+      toast.remove();
+    };
+    container.appendChild(toast);
+    setTimeout(() => {
+      if (toast.parentNode) toast.remove();
+    }, 8500);
+  });
+}
 
 function esc(str) {
   return String(str ?? '')
@@ -1652,17 +1697,24 @@ function fmtEmailDate(ms) {
   });
 }
 
-async function loadBandeja(force = false) {
+async function loadBandeja(force = false, silent = false) {
   if (bandejaLoading && !force) return;
   bandejaLoading = true;
 
   const btn = document.getElementById('btn-refresh-bandeja');
   const spin = document.getElementById('spin-bandeja');
-  if (btn) btn.disabled = true;
-  if (spin) spin.style.display = 'inline-block';
+  const liveText = document.getElementById('bandeja-live-text');
+  const liveDot = document.getElementById('bandeja-live-dot');
+
+  if (!silent) {
+    if (btn) btn.disabled = true;
+    if (spin) spin.style.display = 'inline-block';
+  } else if (liveText) {
+    liveText.textContent = 'Sincronizando...';
+  }
 
   const listEl = document.getElementById('bandeja-list');
-  if (listEl && (window.bandejaEmails.length === 0 || force)) {
+  if (!silent && listEl && (window.bandejaEmails.length === 0 || force)) {
     listEl.innerHTML = `
       <div class="card" style="text-align:center; padding:45px 20px; color:#475569;">
         <div style="font-size:32px; margin-bottom:10px;">📬</div>
@@ -1689,20 +1741,22 @@ async function loadBandeja(force = false) {
 
     if (!res.ok || !data.ok) {
       if (data.needsAuth || data.needsGmailScope || res.status === 401 || res.status === 403) {
-        if (banner) banner.style.display = 'block';
-        if (listEl) {
-          listEl.innerHTML = `
-            <div class="card empty-state" style="padding:45px 24px;">
-              <div class="empty-icon">🔐</div>
-              <div class="empty-title">Conecta tu correo de Gmail para ver tus facturas recibidas</div>
-              <div class="empty-sub" style="max-width:520px; margin:8px auto 20px;">
-                Haz clic en el botón de abajo para autorizar por única vez la lectura de correos con facturas (<code>.xml</code> y <code>.pdf</code>) y sus anexos.
+        if (!silent) {
+          if (banner) banner.style.display = 'block';
+          if (listEl) {
+            listEl.innerHTML = `
+              <div class="card empty-state" style="padding:45px 24px;">
+                <div class="empty-icon">🔐</div>
+                <div class="empty-title">Conecta tu correo de Gmail para ver tus facturas recibidas</div>
+                <div class="empty-sub" style="max-width:520px; margin:8px auto 20px;">
+                  Haz clic en el botón de abajo para autorizar por única vez la lectura de correos con facturas (<code>.xml</code> y <code>.pdf</code>) y sus anexos.
+                </div>
+                <button class="btn btn-primary" onclick="authGoogle()" style="padding:10px 22px; font-size:14px;">
+                  🔗 Conectar y Autorizar Gmail
+                </button>
               </div>
-              <button class="btn btn-primary" onclick="authGoogle()" style="padding:10px 22px; font-size:14px;">
-                🔗 Conectar y Autorizar Gmail
-              </button>
-            </div>
-          `;
+            `;
+          }
         }
         return;
       }
@@ -1711,7 +1765,7 @@ async function loadBandeja(force = false) {
 
     if (banner) banner.style.display = 'none';
     // Filtrar Google Payments en cliente de forma inmediata
-    window.bandejaEmails = (data.correos || []).filter(c => {
+    const nuevosFiltrados = (data.correos || []).filter(c => {
       const s = `${c.fromName || ''} ${c.fromEmail || ''} ${c.subject || ''}`.toLowerCase();
       if (s.includes('google payments') || s.includes('payments-noreply@google.com')) return false;
       c.facturas = (c.facturas || []).filter(f => {
@@ -1720,10 +1774,36 @@ async function loadBandeja(force = false) {
       });
       return c.facturas.length > 0;
     });
-    renderBandeja();
+
+    // Detectar si llegaron correos nuevos durante una actualización en segundo plano
+    const prevIds = new Set((window.bandejaEmails || []).map(c => c.messageId));
+    if (prevIds.size > 0) {
+      const recienLlegados = nuevosFiltrados.filter(c => !prevIds.has(c.messageId));
+      if (recienLlegados.length > 0) {
+        recienLlegados.forEach(c => window.bandejaNewIds.add(c.messageId));
+        showBandejaToast(recienLlegados);
+      }
+    }
+
+    const newSig = getBandejaSignature(nuevosFiltrados);
+    const changed = newSig !== bandejaLastSignature;
+    window.bandejaEmails = nuevosFiltrados;
+    bandejaLastSignature = newSig;
+
+    if (!silent || changed) {
+      renderBandeja();
+    }
+
+    if (liveText) {
+      const nowStr = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      liveText.textContent = `En vivo · ${nowStr}`;
+    }
+    if (liveDot) {
+      liveDot.style.background = '#10b981';
+    }
   } catch (err) {
     console.error('Error en loadBandeja:', err);
-    if (listEl) {
+    if (!silent && listEl) {
       listEl.innerHTML = `
         <div class="card empty-state">
           <div class="empty-icon">⚠️</div>
@@ -1920,13 +2000,19 @@ function renderBandeja() {
       totalArchivosCorreo += correo.adjuntosExtra.length;
     }
 
+    const isNewArrival = window.bandejaNewIds && window.bandejaNewIds.has(correo.messageId);
+    const newBadgeHtml = isNewArrival
+      ? `<span style="background:#10b981; color:#fff; font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; margin-left:6px; letter-spacing:.03em;">✨ NUEVO</span>`
+      : '';
+
     cardsHtml.push(`
-      <div class="bandeja-email-card ${cardStateClass}">
+      <div class="bandeja-email-card ${cardStateClass}" style="${isNewArrival ? 'box-shadow:0 0 0 2px #10b981, 0 8px 20px rgba(16,185,129,0.12);' : ''}">
         <div class="bandeja-email-header">
           <div>
             <div class="bandeja-sender-title">
               <span>✉️ ${esc(correo.fromName)}</span>
               <span class="bandeja-sender-email">&lt;${esc(correo.fromEmail)}&gt;</span>
+              ${newBadgeHtml}
             </div>
             <div class="bandeja-subject">Asunto: <strong>${esc(correo.subject)}</strong></div>
           </div>
@@ -2177,7 +2263,24 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   checkGoogleAuth();
   populateCategorias();
-  if (userEmp === '9997') loadBandeja();
+  if (userEmp === '9997') {
+    loadBandeja();
+    // Sincronización automática en tiempo real cada 25 segundos (silenciosa, sin recargar pantalla)
+    setInterval(() => {
+      if (userEmp === '9997' && document.visibilityState === 'visible') {
+        loadBandeja(false, true);
+      }
+    }, 25000);
+    // Sincronizar también en cuanto el usuario regrese a la ventana/pestaña
+    window.addEventListener('focus', () => {
+      if (userEmp === '9997') loadBandeja(false, true);
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (userEmp === '9997' && document.visibilityState === 'visible') {
+        loadBandeja(false, true);
+      }
+    });
+  }
   loadGastos();
   loadProveedores();
 });
