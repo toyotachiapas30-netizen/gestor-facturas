@@ -139,16 +139,80 @@
               <option value="Toyota Farrera Poniente">Poniente</option>
             </select>
           </div>
-          <div style="display:flex; align-items:center; gap:10px;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <div id="bandeja-live-indicator" style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:999px; background:#ecfdf5; border:1px solid #a7f3d0; color:#047857; font-size:11px; font-weight:700; white-space:nowrap;" title="Sincronización automática en tiempo real cada 25 segundos">
               <span id="bandeja-live-dot" style="width:8px; height:8px; border-radius:50%; background:#10b981; display:inline-block; box-shadow:0 0 0 3px rgba(16,185,129,0.22);"></span>
               <span id="bandeja-live-text">En vivo</span>
             </div>
+            <button class="btn btn-outline" id="btn-telegram-bandeja" onclick="toggleTelegramModal()" style="padding:8px 14px; font-size:12px; font-weight:700; border-color:#38bdf8; color:#0284c7; background:#f0f9ff; white-space:nowrap;">
+              📲 Alertas Telegram
+            </button>
             <button class="btn btn-primary" id="btn-refresh-bandeja" onclick="loadBandeja(true)" style="padding:9px 16px; font-size:13px; white-space:nowrap;">
               <span class="spinner" id="spin-bandeja"></span> 🔄 Actualizar Correos
             </button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Panel de Configuración de Alertas Telegram -->
+    <div id="bandeja-telegram-panel" class="card" style="display:none; border:2px solid #0ea5e9; background:linear-gradient(135deg,#f0f9ff 0%,#ffffff 100%); margin-bottom:20px; padding:20px;">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px;">
+        <div>
+          <div style="font-size:16px; font-weight:800; color:#0369a1; display:flex; align-items:center; gap:8px;">
+            <span>🤖 Notificaciones Instantáneas al Teléfono (Telegram + PDF Adjunto)</span>
+            <span id="tg-status-pill" style="font-size:11px; padding:2px 9px; border-radius:999px; background:#e2e8f0; color:#475569;">No vinculado</span>
+          </div>
+          <p style="font-size:13px; color:#475569; margin:4px 0 0;">
+            Cada vez que entre una factura nueva a tu correo, recibirás al instante en tu teléfono los datos del proveedor, monto, sucursal y <strong>el archivo PDF de la factura adjunto en el chat</strong>.
+          </p>
+        </div>
+        <button class="btn btn-outline" onclick="toggleTelegramModal()" style="padding:4px 10px; font-size:12px;">✕ Cerrar</button>
+      </div>
+
+      <!-- Vista cuando ya está conectado -->
+      <div id="tg-connected-box" style="display:none; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:10px; padding:14px 16px; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+          <div>
+            <div style="font-weight:800; color:#065f46; font-size:14px;" id="tg-connected-title">✅ Teléfono vinculado correctamente</div>
+            <div style="font-size:12px; color:#047857; margin-top:2px;" id="tg-connected-sub">Recibiendo alertas 24/7 en tiempo real.</div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary" id="btn-tg-test" onclick="sendTelegramTestAlert()" style="background:#0284c7; border-color:#0284c7; padding:7px 14px; font-size:12px;">
+              📲 Enviar Prueba (con PDF) a mi Teléfono
+            </button>
+            <button class="btn btn-outline" onclick="disconnectTelegramAlert()" style="color:#dc2626; border-color:#fca5a5; padding:7px 12px; font-size:12px;">
+              Desvincular
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Formulario de vinculación en 2 pasos -->
+      <div id="tg-setup-box" style="background:#fff; border:1px solid #bae6fd; border-radius:10px; padding:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-bottom:14px;">
+          <div style="font-size:12.5px; color:#334155; line-height:1.5;">
+            <strong>Paso 1 (30 seg):</strong> Abre <a href="https://t.me/BotFather" target="_blank" style="color:#0284c7; font-weight:700;">@BotFather en Telegram ↗</a>, envíale el comando <code>/newbot</code>, ponle nombre (ej. <em>Pagos Toyota</em>) y copia el <strong>Token</strong> que te entrega.
+          </div>
+          <div style="font-size:12.5px; color:#334155; line-height:1.5;">
+            <strong>Paso 2:</strong> Abre el enlace de tu nuevo Bot desde tu teléfono, presiona <strong>"Iniciar"</strong> (o mándale un <em>"Hola"</em>) y luego haz clic en <strong>Vincular mi Teléfono</strong> aquí abajo.
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+          <div class="field" style="flex:2; min-width:240px; margin:0;">
+            <label style="font-size:11px;">Token del Bot de Telegram (@BotFather)</label>
+            <input type="text" id="inp-tg-token" placeholder="Ej: 7123456789:AAHxyz123456..." style="padding:9px 12px; font-size:13px; font-family:monospace;" />
+          </div>
+          <div class="field" style="flex:1; min-width:150px; margin:0;">
+            <label style="font-size:11px;">Chat ID (Opcional · Se detecta solo)</label>
+            <input type="text" id="inp-tg-chatid" placeholder="Auto-detectar" style="padding:9px 12px; font-size:13px; font-family:monospace;" />
+          </div>
+          <button class="btn btn-primary" id="btn-tg-connect" onclick="connectTelegramAlert()" style="background:#0284c7; border-color:#0284c7; padding:10px 18px; font-size:13px; font-weight:700; white-space:nowrap;">
+            🔗 Vincular mi Teléfono
+          </button>
+        </div>
+        <div id="tg-feedback-msg" style="margin-top:10px; font-size:12.5px; display:none;"></div>
       </div>
     </div>
 

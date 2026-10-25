@@ -2233,6 +2233,165 @@ async function procesarFacturaDesdeBandeja(messageId, idxFactura) {
   }
 }
 
+// ── Alertas a Teléfono vía Telegram ──────────────────────────────────────────
+function toggleTelegramModal() {
+  const panel = document.getElementById('bandeja-telegram-panel');
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none' || !panel.style.display;
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    loadTelegramStatus();
+  }
+}
+
+async function loadTelegramStatus() {
+  try {
+    const res = await fetch('/api/mail/telegram/status', { cache: 'no-store' });
+    const data = await res.json();
+    if (!data.ok) return;
+
+    const btnTop = document.getElementById('btn-telegram-bandeja');
+    const pill = document.getElementById('tg-status-pill');
+    const connBox = document.getElementById('tg-connected-box');
+    const connTitle = document.getElementById('tg-connected-title');
+    const connSub = document.getElementById('tg-connected-sub');
+
+    if (data.configured && data.enabled) {
+      if (btnTop) {
+        btnTop.innerHTML = '📲 Telegram Activo ✅';
+        btnTop.style.background = '#ecfdf5';
+        btnTop.style.borderColor = '#6ee7b7';
+        btnTop.style.color = '#047857';
+      }
+      if (pill) {
+        pill.textContent = 'Activo 24/7';
+        pill.style.background = '#d1fae5';
+        pill.style.color = '#065f46';
+      }
+      if (connBox) connBox.style.display = 'block';
+      if (connTitle) {
+        connTitle.textContent = `✅ Conectado a ${data.chatName || 'tu Teléfono'}${data.botUsername ? ` (@${data.botUsername})` : ''}`;
+      }
+      if (connSub) {
+        connSub.textContent = `Chat ID: ${data.chatId} · Recibiendo alertas con PDF adjunto cuando llega una factura nueva.`;
+      }
+    } else {
+      if (btnTop) {
+        btnTop.innerHTML = '📲 Alertas Telegram';
+        btnTop.style.background = '#f0f9ff';
+        btnTop.style.borderColor = '#38bdf8';
+        btnTop.style.color = '#0284c7';
+      }
+      if (pill) {
+        pill.textContent = 'Sin vincular';
+        pill.style.background = '#e2e8f0';
+        pill.style.color = '#475569';
+      }
+      if (connBox) connBox.style.display = 'none';
+    }
+  } catch (err) {
+    console.warn('Error verificando estatus Telegram:', err);
+  }
+}
+
+async function connectTelegramAlert() {
+  const tokenEl = document.getElementById('inp-tg-token');
+  const chatEl = document.getElementById('inp-tg-chatid');
+  const btn = document.getElementById('btn-tg-connect');
+  const msgEl = document.getElementById('tg-feedback-msg');
+
+  const botToken = (tokenEl?.value || '').trim();
+  const chatId = (chatEl?.value || '').trim();
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Verificando Bot...';
+  }
+  if (msgEl) msgEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/mail/telegram/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botToken, chatId })
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      if (msgEl) {
+        msgEl.style.display = 'block';
+        if (data.needsStartMsg && data.botUsername) {
+          msgEl.style.color = '#b45309';
+          msgEl.innerHTML = `👉 <strong>¡Casi listo!</strong> Abre <a href="https://t.me/${esc(data.botUsername)}" target="_blank" style="color:#0284c7; font-weight:800;">@${esc(data.botUsername)} en Telegram ↗</a> desde tu celular, toca <strong>Iniciar</strong> (o mándale un <em>"Hola"</em>) y vuelve a presionar <strong>🔗 Vincular mi Teléfono</strong>.`;
+        } else {
+          msgEl.style.color = '#dc2626';
+          msgEl.textContent = '⚠️ ' + (data.error || 'No se pudo vincular con Telegram.');
+        }
+      }
+      return;
+    }
+
+    if (msgEl) {
+      msgEl.style.display = 'block';
+      msgEl.style.color = '#059669';
+      msgEl.innerHTML = `🎉 <strong>¡Listo!</strong> Ya te enviamos un mensaje de confirmación a tu teléfono (<strong>${esc(data.chatName)}</strong>).`;
+    }
+    await loadTelegramStatus();
+  } catch (err) {
+    if (msgEl) {
+      msgEl.style.display = 'block';
+      msgEl.style.color = '#dc2626';
+      msgEl.textContent = '⚠️ Error de conexión: ' + err.message;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '🔗 Vincular mi Teléfono';
+    }
+  }
+}
+
+async function sendTelegramTestAlert() {
+  const btn = document.getElementById('btn-tg-test');
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Enviando PDF a tu teléfono...';
+  }
+  try {
+    const res = await fetch('/api/mail/telegram/test', { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al enviar prueba');
+    if (btn) {
+      btn.innerHTML = '✅ ¡Enviado a tu Telegram!';
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }, 2800);
+    }
+  } catch (err) {
+    alert('Error al enviar prueba: ' + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+}
+
+async function disconnectTelegramAlert() {
+  if (!confirm('¿Deseas desvincular las alertas de Telegram de tu teléfono?')) return;
+  try {
+    await fetch('/api/mail/telegram/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disconnect: true })
+    });
+    await loadTelegramStatus();
+  } catch (err) {
+    alert('Error al desvincular: ' + err.message);
+  }
+}
+
 async function logout() {
   try {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -2265,6 +2424,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   populateCategorias();
   if (userEmp === '9997') {
     loadBandeja();
+    loadTelegramStatus();
     // Sincronización automática en tiempo real cada 25 segundos (silenciosa, sin recargar pantalla)
     setInterval(() => {
       if (userEmp === '9997' && document.visibilityState === 'visible') {

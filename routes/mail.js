@@ -701,6 +701,11 @@ router.get('/inbox', async (req, res) => {
     // Ordenar del más reciente al más antiguo
     correosEnriquecidos.sort((a, b) => b.fechaMs - a.fechaMs);
 
+    // Disparar alertas a Telegram en segundo plano si entraron correos nuevos
+    processTelegramNotificationsForCorreos(gmail, correosEnriquecidos).catch(e => {
+      console.warn('⚠️ Aviso en notificación Telegram:', e.message);
+    });
+
     return res.json({
       ok: true,
       correos: correosEnriquecidos
@@ -710,6 +715,64 @@ router.get('/inbox', async (req, res) => {
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+// ── Helper para obtener Buffer de cualquier adjunto (suelto, inline o dentro de ZIP) ──
+async function resolveAttachmentBuffer(gmail, messageId, attachmentId, filename = '') {
+  if (!attachmentId) return null;
+  let buffer = null;
+
+  if (attachmentId.startsWith('ZIP_')) {
+    const rawZipSpec = attachmentId.slice(4);
+    const sepIdx = rawZipSpec.indexOf(':::');
+    if (sepIdx !== -1) {
+      const zipAttId = rawZipSpec.slice(0, sepIdx);
+      const targetEntryPath = decodeURIComponent(rawZipSpec.slice(sepIdx + 3));
+      let zipBuf = null;
+      if (zipAttId.startsWith('INLINE_')) {
+        const partPath = zipAttId.replace(/^INLINE_/, '');
+        const msgRes = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
+        const part = findInlinePartByPath(msgRes.data.payload, partPath);
+        if (part && part.body && part.body.data) {
+          zipBuf = Buffer.from(part.body.data, 'base64');
+        }
+      } else {
+        const attRes = await gmail.users.messages.attachments.get({
+          userId: 'me',
+          messageId,
+          id: zipAttId
+        });
+        if (attRes?.data?.data) {
+          zipBuf = Buffer.from(attRes.data.data, 'base64');
+        }
+      }
+      if (zipBuf) {
+        const entries = extractZipBuffer(zipBuf);
+        const foundEntry = entries.find(e => e.entryPath === targetEntryPath || e.filename === filename);
+        if (foundEntry) {
+          buffer = foundEntry.buffer;
+        }
+      }
+    }
+  } else if (attachmentId.startsWith('INLINE_')) {
+    const partPath = attachmentId.replace(/^INLINE_/, '');
+    const msgRes = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
+    const part = findInlinePartByPath(msgRes.data.payload, partPath);
+    if (part && part.body && part.body.data) {
+      buffer = Buffer.from(part.body.data, 'base64');
+    }
+  } else {
+    const attRes = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId,
+      id: attachmentId
+    });
+    if (attRes?.data?.data) {
+      buffer = Buffer.from(attRes.data.data, 'base64');
+    }
+  }
+
+  return buffer;
+}
 
 // ── GET /api/mail/attachment/:messageId/:attachmentId ─────
 // Descarga o muestra en línea un archivo adjunto de Gmail (.xml, .pdf, imágenes, cotizaciones)
@@ -725,58 +788,7 @@ router.get('/attachment/:messageId/:attachmentId', async (req, res) => {
     const { filename = 'archivo', mimeType = 'application/octet-stream', download = '0' } = req.query;
     const gmail = getGoogle().gmail({ version: 'v1', auth: client });
 
-    let buffer = null;
-
-    if (attachmentId.startsWith('ZIP_')) {
-      // Archivo extraído de un .ZIP adjunto: ZIP_<zipAttId>:::<encodedEntryPath>
-      const rawZipSpec = attachmentId.slice(4);
-      const sepIdx = rawZipSpec.indexOf(':::');
-      if (sepIdx !== -1) {
-        const zipAttId = rawZipSpec.slice(0, sepIdx);
-        const targetEntryPath = decodeURIComponent(rawZipSpec.slice(sepIdx + 3));
-        let zipBuf = null;
-        if (zipAttId.startsWith('INLINE_')) {
-          const partPath = zipAttId.replace(/^INLINE_/, '');
-          const msgRes = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
-          const part = findInlinePartByPath(msgRes.data.payload, partPath);
-          if (part && part.body && part.body.data) {
-            zipBuf = Buffer.from(part.body.data, 'base64');
-          }
-        } else {
-          const attRes = await gmail.users.messages.attachments.get({
-            userId: 'me',
-            messageId,
-            id: zipAttId
-          });
-          if (attRes?.data?.data) {
-            zipBuf = Buffer.from(attRes.data.data, 'base64');
-          }
-        }
-        if (zipBuf) {
-          const entries = extractZipBuffer(zipBuf);
-          const foundEntry = entries.find(e => e.entryPath === targetEntryPath || e.filename === filename);
-          if (foundEntry) {
-            buffer = foundEntry.buffer;
-          }
-        }
-      }
-    } else if (attachmentId.startsWith('INLINE_')) {
-      const partPath = attachmentId.replace(/^INLINE_/, '');
-      const msgRes = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
-      const part = findInlinePartByPath(msgRes.data.payload, partPath);
-      if (part && part.body && part.body.data) {
-        buffer = Buffer.from(part.body.data, 'base64');
-      }
-    } else {
-      const attRes = await gmail.users.messages.attachments.get({
-        userId: 'me',
-        messageId,
-        id: attachmentId
-      });
-      if (attRes?.data?.data) {
-        buffer = Buffer.from(attRes.data.data, 'base64');
-      }
-    }
+    const buffer = await resolveAttachmentBuffer(gmail, messageId, attachmentId, filename);
 
     if (!buffer) {
       return res.status(404).send('Archivo adjunto no encontrado en el correo.');
@@ -836,6 +848,477 @@ router.patch('/estatus', async (req, res) => {
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🤖 ALERTAS A TELÉFONO VÍA BOT DE TELEGRAM (CON ENVÍO AUTOMÁTICO DE PDF)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function getTelegramConfig() {
+  try {
+    const db = getDB();
+    const row = db.prepare("SELECT valor FROM bandeja_config WHERE clave = 'telegram_config'").get();
+    if (row && row.valor) {
+      return JSON.parse(row.valor);
+    }
+  } catch (e) {}
+  return {
+    botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    chatId: process.env.TELEGRAM_CHAT_ID || '',
+    chatName: '',
+    botUsername: '',
+    enabled: false,
+    notifiedIds: []
+  };
+}
+
+function saveTelegramConfig(cfg) {
+  const db = getDB();
+  db.prepare(`
+    INSERT INTO bandeja_config (clave, valor, updated_at)
+    VALUES ('telegram_config', ?, datetime('now','localtime'))
+    ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor, updated_at = excluded.updated_at
+  `).run(JSON.stringify(cfg));
+  backupDatabaseToDrive().catch(e => console.warn('⚠️ Error respaldando telegram_config:', e.message));
+}
+
+async function sendTelegramText(botToken, chatId, htmlText, replyMarkup = null) {
+  const body = {
+    chat_id: chatId,
+    text: htmlText,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true
+  };
+  if (replyMarkup) body.reply_markup = replyMarkup;
+
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(data.description || 'Error al enviar mensaje por Telegram');
+  }
+  return data;
+}
+
+async function sendTelegramPdf(botToken, chatId, pdfBuffer, filename, captionHtml, replyMarkup = null) {
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('caption', captionHtml.slice(0, 1020));
+  form.append('parse_mode', 'HTML');
+  if (replyMarkup) {
+    form.append('reply_markup', JSON.stringify(replyMarkup));
+  }
+  const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
+  form.append('document', blob, filename || 'Factura.pdf');
+
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+    method: 'POST',
+    body: form
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(data.description || 'Error al enviar PDF por Telegram');
+  }
+  return data;
+}
+
+async function notifySingleEmailToTelegram(gmail, correo, cfg, isTest = false) {
+  if (!cfg?.botToken || !cfg?.chatId) return;
+  const facturas = correo.facturas || [];
+  const extraCount = (correo.adjuntosExtra || []).length;
+
+  for (const f of facturas) {
+    const montoFmt = new Intl.NumberFormat('es-MX', {
+      style: 'currency',
+      currency: f.moneda || 'MXN'
+    }).format(Number(f.total) || 0);
+
+    const headerTitle = isTest
+      ? '🧪 <b>PRUEBA DE ALERTA — CONTROL DE PAGOS</b>'
+      : '📬 <b>NUEVA FACTURA EN BANDEJA</b>';
+
+    const msgLines = [
+      headerTitle,
+      '',
+      `🏢 <b>Proveedor:</b> ${escHtml(f.nombreEmisor)}`,
+      `🆔 <b>RFC:</b> <code>${escHtml(f.rfcEmisor)}</code>`,
+      `🧾 <b>Folio:</b> <code>${escHtml(f.folio)}</code>`,
+      `💰 <b>Total:</b> <b>${escHtml(montoFmt)} ${escHtml(f.moneda || 'MXN')}</b>`,
+      `📍 <b>Sucursal:</b> ${escHtml(f.sucursal || 'Toyota Chiapas')}`,
+      f.concepto ? `📝 <b>Concepto:</b> ${escHtml(f.concepto.slice(0, 140))}` : '',
+      `✉️ <b>Asunto:</b> ${escHtml(correo.subject || '')}`,
+      `📎 <b>Archivos:</b> 1 XML${f.pdf ? ' + 1 PDF' : ''}${extraCount > 0 ? ` + ${extraCount} anexo(s)` : ''}`
+    ].filter(Boolean).join('\n');
+
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          {
+            text: '⚡ Abrir Bandeja de Entrada',
+            url: 'https://control.pagos.toyoter.com'
+          }
+        ]
+      ]
+    };
+
+    let sentWithPdf = false;
+    if (f.pdf && f.pdf.attachmentId && gmail) {
+      try {
+        const pdfBuf = await resolveAttachmentBuffer(gmail, correo.messageId, f.pdf.attachmentId, f.pdf.filename);
+        if (pdfBuf && pdfBuf.length > 0 && pdfBuf.length < 20 * 1024 * 1024) {
+          await sendTelegramPdf(cfg.botToken, cfg.chatId, pdfBuf, f.pdf.filename, msgLines, replyMarkup);
+          sentWithPdf = true;
+        }
+      } catch (pdfErr) {
+        console.warn('⚠️ No se pudo adjuntar PDF a Telegram, enviando texto:', pdfErr.message);
+      }
+    }
+
+    if (!sentWithPdf) {
+      await sendTelegramText(cfg.botToken, cfg.chatId, msgLines, replyMarkup);
+    }
+  }
+}
+
+let telegramNotifyRunning = false;
+async function processTelegramNotificationsForCorreos(gmail, correos) {
+  if (telegramNotifyRunning) return;
+  const cfg = getTelegramConfig();
+  if (!cfg.enabled || !cfg.botToken || !cfg.chatId) return;
+  if (!Array.isArray(correos) || correos.length === 0) return;
+
+  telegramNotifyRunning = true;
+  try {
+    const notifiedSet = new Set(Array.isArray(cfg.notifiedIds) ? cfg.notifiedIds : []);
+
+    // Si es la primera vez que corre tras activar, sembramos los IDs actuales para solo notificar facturas nuevas a partir de hoy
+    if (notifiedSet.size === 0) {
+      correos.forEach(c => notifiedSet.add(c.messageId));
+      cfg.notifiedIds = Array.from(notifiedSet).slice(-300);
+      saveTelegramConfig(cfg);
+      return;
+    }
+
+    const nuevos = correos.filter(c => !notifiedSet.has(c.messageId));
+    if (nuevos.length === 0) return;
+
+    // Notificar del más antiguo al más reciente de los nuevos
+    for (const nuevoCorreo of nuevos.slice().reverse()) {
+      notifiedSet.add(nuevoCorreo.messageId);
+      await notifySingleEmailToTelegram(gmail, nuevoCorreo, cfg, false);
+    }
+
+    cfg.notifiedIds = Array.from(notifiedSet).slice(-300);
+    saveTelegramConfig(cfg);
+  } finally {
+    telegramNotifyRunning = false;
+  }
+}
+
+// ── GET /api/mail/telegram/status ─────────────────────────
+router.get('/telegram/status', (req, res) => {
+  if (!isAuthorizedBandejaUser(req)) {
+    return res.status(403).json({ ok: false, error: 'Exclusivo para el trabajador 9997.' });
+  }
+  const cfg = getTelegramConfig();
+  return res.json({
+    ok: true,
+    configured: Boolean(cfg.botToken && cfg.chatId),
+    enabled: Boolean(cfg.enabled && cfg.botToken && cfg.chatId),
+    botUsername: cfg.botUsername || '',
+    chatId: cfg.chatId || '',
+    chatName: cfg.chatName || '',
+    hasToken: Boolean(cfg.botToken)
+  });
+});
+
+// ── POST /api/mail/telegram/connect ───────────────────────
+// Vincula el Bot de Telegram y detecta automáticamente el Chat ID del teléfono
+router.post('/telegram/connect', async (req, res) => {
+  try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).json({ ok: false, error: 'Exclusivo para el trabajador 9997.' });
+    }
+    const prevCfg = getTelegramConfig();
+    const botToken = String(req.body?.botToken || prevCfg.botToken || '').trim();
+    let chatId = String(req.body?.chatId || '').trim();
+
+    if (!botToken || !botToken.includes(':')) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Ingresa un Token de Bot válido (ejemplo: 123456789:AAH...). Lo obtienes en @BotFather.'
+      });
+    }
+
+    // 1. Verificar el Bot en Telegram (/getMe)
+    const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+    const meData = await meRes.json();
+    if (!meData.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: 'El Token del Bot no es válido en Telegram. Verifica que lo hayas copiado completo de @BotFather.'
+      });
+    }
+    const botUsername = meData.result?.username || '';
+
+    // 2. Si no se proporcionó chatId, buscar el último mensaje que Yoni le haya enviado al Bot (/getUpdates)
+    let chatName = prevCfg.chatName || '';
+    if (!chatId) {
+      const updRes = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?limit=20`);
+      const updData = await updRes.json();
+      const updates = (updData.result || []).slice().reverse();
+      for (const u of updates) {
+        const msg = u.message || u.edited_message || u.callback_query?.message;
+        if (msg && msg.chat && msg.chat.id) {
+          chatId = String(msg.chat.id);
+          chatName = [msg.chat.first_name, msg.chat.last_name].filter(Boolean).join(' ') || msg.chat.username || 'Mi Teléfono';
+          break;
+        }
+      }
+    }
+
+    if (!chatId) {
+      return res.status(400).json({
+        ok: false,
+        needsStartMsg: true,
+        botUsername,
+        error: `¡Bot @${botUsername} verificado! Ahora abre tu Bot en Telegram desde tu teléfono, presiona "Iniciar" (o envíale "Hola") y vuelve a darle clic a "Vincular mi Teléfono".`
+      });
+    }
+
+    // 3. Sembrar IDs actuales de la caché para no re-notificar facturas antiguas
+    const db = getDB();
+    const cachedRows = db.prepare('SELECT message_id FROM bandeja_cache').all();
+    const notifiedIds = Array.from(new Set([
+      ...(prevCfg.notifiedIds || []),
+      ...cachedRows.map(r => r.message_id)
+    ])).slice(-300);
+
+    const newCfg = {
+      botToken,
+      chatId,
+      chatName: chatName || 'Teléfono vinculado',
+      botUsername,
+      enabled: true,
+      notifiedIds
+    };
+    saveTelegramConfig(newCfg);
+
+    // 4. Enviar mensaje de bienvenida al teléfono
+    await sendTelegramText(
+      botToken,
+      chatId,
+      [
+        '✅ <b>¡Control de Pagos Toyota conectado a tu teléfono!</b>',
+        '',
+        'A partir de este momento recibirás aquí una notificación instantánea (con el <b>PDF de la factura adjunto</b>) cada vez que llegue una factura nueva a tu Bandeja de Entrada.'
+      ].join('\n'),
+      {
+        inline_keyboard: [
+          [{ text: '💳 Abrir Control de Pagos', url: 'https://control.pagos.toyoter.com' }]
+        ]
+      }
+    );
+
+    return res.json({
+      ok: true,
+      configured: true,
+      enabled: true,
+      botUsername,
+      chatId,
+      chatName: newCfg.chatName
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── POST /api/mail/telegram/test ──────────────────────────
+// Envía una prueba real al teléfono usando la factura más reciente de la Bandeja (con su PDF adjunto)
+router.post('/telegram/test', async (req, res) => {
+  try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).json({ ok: false, error: 'Exclusivo para el trabajador 9997.' });
+    }
+    const cfg = getTelegramConfig();
+    if (!cfg.botToken || !cfg.chatId) {
+      return res.status(400).json({ ok: false, error: 'Primero vincula tu Bot de Telegram.' });
+    }
+
+    const client = getAuthorizedClient();
+    const gmail = client ? getGoogle().gmail({ version: 'v1', auth: client }) : null;
+
+    // Buscar el correo con factura más reciente en caché para enviar una prueba real con PDF
+    const db = getDB();
+    const rows = db.prepare('SELECT data_json FROM bandeja_cache ORDER BY fecha_ms DESC LIMIT 20').all();
+    let sampleEmail = null;
+    for (const r of rows) {
+      try {
+        const parsed = JSON.parse(r.data_json);
+        if (parsed && Array.isArray(parsed.facturas) && parsed.facturas.length > 0) {
+          const senderCheck = `${parsed.fromName || ''} ${parsed.fromEmail || ''}`.toLowerCase();
+          if (!senderCheck.includes('google payments')) {
+            sampleEmail = parsed;
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (sampleEmail) {
+      await notifySingleEmailToTelegram(gmail, sampleEmail, cfg, true);
+    } else {
+      await sendTelegramText(
+        cfg.botToken,
+        cfg.chatId,
+        '🧪 <b>Prueba de Alerta — Control de Pagos Toyota</b>\n\nTu teléfono está correctamente conectado y listo para recibir facturas nuevas.'
+      );
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── POST /api/mail/telegram/toggle ────────────────────────
+router.post('/telegram/toggle', (req, res) => {
+  if (!isAuthorizedBandejaUser(req)) {
+    return res.status(403).json({ ok: false, error: 'Exclusivo para el trabajador 9997.' });
+  }
+  const cfg = getTelegramConfig();
+  const { enabled, disconnect } = req.body || {};
+  if (disconnect) {
+    saveTelegramConfig({ botToken: '', chatId: '', chatName: '', botUsername: '', enabled: false, notifiedIds: [] });
+    return res.json({ ok: true, configured: false, enabled: false });
+  }
+  cfg.enabled = Boolean(enabled);
+  saveTelegramConfig(cfg);
+  return res.json({ ok: true, configured: Boolean(cfg.botToken && cfg.chatId), enabled: cfg.enabled });
+});
+
+// ── Monitoreo Automático en el Servidor cada 60 segundos (24/7 sin tener la web abierta) ──
+setInterval(async () => {
+  try {
+    const cfg = getTelegramConfig();
+    if (!cfg.enabled || !cfg.botToken || !cfg.chatId) return;
+    const client = getAuthorizedClient();
+    if (!client) return;
+
+    const gmail = getGoogle().gmail({ version: 'v1', auth: client });
+    const listRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'has:attachment (filename:xml OR filename:zip) -from:payments-noreply@google.com -"Google Payments"',
+      maxResults: 8
+    });
+    const messages = listRes?.data?.messages || [];
+    if (messages.length === 0) return;
+
+    const notifiedSet = new Set(Array.isArray(cfg.notifiedIds) ? cfg.notifiedIds : []);
+    const candidates = messages.filter(m => !notifiedSet.has(m.id));
+    if (candidates.length === 0) return;
+
+    const nuevosCorreos = [];
+    for (const m of candidates) {
+      try {
+        const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'full' });
+        const msgData = msgRes.data;
+        const headers = msgData.payload?.headers || [];
+        const subject = getHeader(headers, 'Subject') || '(Sin asunto)';
+        const fromRaw = getHeader(headers, 'From');
+        const toRaw = getHeader(headers, 'To');
+        const sender = parseSender(fromRaw);
+        const senderCheck = `${sender.name} ${sender.email} ${subject}`.toLowerCase();
+        if (senderCheck.includes('google payments') || senderCheck.includes('payments-noreply@google.com')) {
+          notifiedSet.add(m.id);
+          continue;
+        }
+
+        const rawPartsAll = extractPartsRecursive(msgData.payload);
+        const allParts = [];
+        const seenKeys = new Set();
+        for (const p of rawPartsAll) {
+          if (/\.zip$/i.test(p.filename)) {
+            const zipBuf = await fetchAttachmentBuffer(gmail, m.id, p);
+            if (zipBuf) {
+              for (const entry of extractZipBuffer(zipBuf)) {
+                const k = `${entry.filename.toLowerCase()}::${entry.size}`;
+                if (seenKeys.has(k)) continue;
+                seenKeys.add(k);
+                allParts.push({
+                  filename: entry.filename,
+                  mimeType: entry.mimeType,
+                  attachmentId: `ZIP_${p.attachmentId}:::${encodeURIComponent(entry.entryPath)}`,
+                  preloadedBuffer: entry.buffer,
+                  size: entry.size
+                });
+              }
+            }
+          } else {
+            const k = `${p.filename.toLowerCase()}::${p.size}`;
+            if (!seenKeys.has(k)) {
+              seenKeys.add(k);
+              allParts.push(p);
+            }
+          }
+        }
+
+        const xmlParts = allParts.filter(p => /\.xml$/i.test(p.filename));
+        const pdfParts = allParts.filter(p => /\.pdf$/i.test(p.filename));
+        const otherParts = allParts.filter(p => !/\.xml$/i.test(p.filename) && !/\.pdf$/i.test(p.filename));
+
+        if (xmlParts.length === 0) {
+          notifiedSet.add(m.id);
+          continue;
+        }
+
+        const xmlItems = [];
+        for (const xp of xmlParts) {
+          const buf = xp.preloadedBuffer || await fetchAttachmentBuffer(gmail, m.id, xp);
+          const cfdi = buf ? await parseCFDIXmlBuffer(buf) : null;
+          const sucursal = detectSucursal(cfdi, subject, toRaw, msgData.snippet);
+          xmlItems.push({ messageId: m.id, part: xp, cfdi, sucursal });
+        }
+
+        const { facturas, adjuntosExtra } = pairXmlsAndPdfs(xmlItems, pdfParts, otherParts);
+        const facturasSinGoogle = facturas.filter(f => {
+          const em = `${f.nombreEmisor || ''} ${f.rfcEmisor || ''}`.toUpperCase();
+          return !em.includes('GOOGLE CLOUD') && !em.includes('GCM221031837');
+        });
+        if (facturasSinGoogle.length > 0) {
+          nuevosCorreos.push({
+            messageId: m.id,
+            subject,
+            fromName: sender.name,
+            fromEmail: sender.email,
+            facturas: facturasSinGoogle,
+            adjuntosExtra
+          });
+        } else {
+          notifiedSet.add(m.id);
+        }
+      } catch (e) {}
+    }
+
+    if (nuevosCorreos.length > 0) {
+      await processTelegramNotificationsForCorreos(gmail, nuevosCorreos);
+    } else {
+      cfg.notifiedIds = Array.from(notifiedSet).slice(-300);
+      saveTelegramConfig(cfg);
+    }
+  } catch (err) {
+    console.warn('⚠️ Error en monitor automático Telegram:', err.message);
+  }
+}, 60000);
 
 // ── Rutas Legacy Apple Mail ───────────────────────────────
 function searchMailAppleScript(searchTerm) {
