@@ -869,11 +869,11 @@ function getTelegramConfig() {
     }
   } catch (e) {}
   return {
-    botToken: process.env.TELEGRAM_BOT_TOKEN || '',
-    chatId: process.env.TELEGRAM_CHAT_ID || '',
-    chatName: '',
-    botUsername: '',
-    enabled: false,
+    botToken: process.env.TELEGRAM_BOT_TOKEN || '8377479511:AAF4cIO3ihKCpQ9cRPHSxJYm49VSCJ-49sg',
+    chatId: process.env.TELEGRAM_CHAT_ID || '7579824550',
+    chatName: 'Yoni Ruiz',
+    botUsername: 'control_facturas_toyoter_bot',
+    enabled: true,
     notifiedIds: []
   };
 }
