@@ -1697,6 +1697,29 @@ function fmtEmailDate(ms) {
   });
 }
 
+const BANDEJA_LOCAL_CACHE_KEY = 'bandeja_instant_cache_v1';
+
+function saveBandejaInstantCache(correos) {
+  try {
+    localStorage.setItem(BANDEJA_LOCAL_CACHE_KEY, JSON.stringify(correos || []));
+  } catch (e) {}
+}
+
+function restoreBandejaInstantCache() {
+  try {
+    const raw = localStorage.getItem(BANDEJA_LOCAL_CACHE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      window.bandejaEmails = parsed;
+      bandejaLastSignature = getBandejaSignature(parsed);
+      renderBandeja();
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 async function loadBandeja(force = false, silent = false) {
   if (bandejaLoading && !force) return;
   bandejaLoading = true;
@@ -1706,6 +1729,11 @@ async function loadBandeja(force = false, silent = false) {
   const liveText = document.getElementById('bandeja-live-text');
   const liveDot = document.getElementById('bandeja-live-dot');
 
+  // Si aún no hay correos en memoria, pintar de inmediato la caché local en 0.05s
+  if (window.bandejaEmails.length === 0) {
+    restoreBandejaInstantCache();
+  }
+
   if (!silent) {
     if (btn) btn.disabled = true;
     if (spin) spin.style.display = 'inline-block';
@@ -1714,7 +1742,7 @@ async function loadBandeja(force = false, silent = false) {
   }
 
   const listEl = document.getElementById('bandeja-list');
-  if (!silent && listEl && (window.bandejaEmails.length === 0 || force)) {
+  if (!silent && listEl && window.bandejaEmails.length === 0) {
     listEl.innerHTML = `
       <div class="card" style="text-align:center; padding:45px 20px; color:#475569;">
         <div style="font-size:32px; margin-bottom:10px;">📬</div>
@@ -1729,13 +1757,21 @@ async function loadBandeja(force = false, silent = false) {
     const mes = document.getElementById('bandeja-mes')?.value || 'todos';
     let res = await fetch(`/api/mail/inbox?anio=${encodeURIComponent(anio)}&mes=${encodeURIComponent(mes)}`, { cache: 'no-store' });
     let rawText = await res.text();
-    if (!rawText || !rawText.trim()) {
-      // Reintento automático si el servidor estaba reiniciando contenedor
-      await new Promise(r => setTimeout(r, 1200));
+    if (!rawText || !rawText.trim() || res.status >= 502) {
+      // Reintento automático si el servidor estaba despertando del reposo
+      await new Promise(r => setTimeout(r, 1500));
       res = await fetch(`/api/mail/inbox?anio=${encodeURIComponent(anio)}&mes=${encodeURIComponent(mes)}`, { cache: 'no-store' });
       rawText = await res.text();
     }
-    const data = rawText ? JSON.parse(rawText) : { ok: false, error: 'Respuesta vacía del servidor, intenta de nuevo.' };
+    let data = null;
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch (parseErr) {
+      data = null;
+    }
+    if (!data) {
+      throw new Error('WAKEUP_RETRY');
+    }
 
     const banner = document.getElementById('bandeja-auth-banner');
 
@@ -1743,7 +1779,7 @@ async function loadBandeja(force = false, silent = false) {
       if (data.needsAuth || data.needsGmailScope || res.status === 401 || res.status === 403) {
         if (!silent) {
           if (banner) banner.style.display = 'block';
-          if (listEl) {
+          if (listEl && window.bandejaEmails.length === 0) {
             listEl.innerHTML = `
               <div class="card empty-state" style="padding:45px 24px;">
                 <div class="empty-icon">🔐</div>
@@ -1790,6 +1826,10 @@ async function loadBandeja(force = false, silent = false) {
     window.bandejaEmails = nuevosFiltrados;
     bandejaLastSignature = newSig;
 
+    if (mes === 'todos') {
+      saveBandejaInstantCache(nuevosFiltrados);
+    }
+
     if (!silent || changed) {
       renderBandeja();
     }
@@ -1802,17 +1842,24 @@ async function loadBandeja(force = false, silent = false) {
       liveDot.style.background = '#10b981';
     }
   } catch (err) {
-    console.error('Error en loadBandeja:', err);
-    if (!silent && listEl) {
+    console.warn('Reconectando Bandeja en segundo plano:', err.message);
+    if (liveText) {
+      liveText.textContent = '⚡ Conectando servidor...';
+    }
+    // Si aún no había caché local guardada, mostrar aviso amigable de reconexión automática (sin pantalla de error)
+    if (listEl && window.bandejaEmails.length === 0) {
       listEl.innerHTML = `
-        <div class="card empty-state">
-          <div class="empty-icon">⚠️</div>
-          <div class="empty-title">No se pudo cargar la Bandeja de Entrada</div>
-          <div class="empty-sub">${esc(err.message)}</div>
-          <button class="btn btn-outline" onclick="loadBandeja(true)" style="margin-top:16px;">🔄 Reintentar</button>
+        <div class="card" style="text-align:center; padding:45px 24px; color:#334155;">
+          <div style="font-size:32px; margin-bottom:10px;">⚡</div>
+          <div style="font-weight:700; font-size:15px;">Despertando el servidor de correos...</div>
+          <div style="font-size:13px; color:#64748b; margin-top:6px;">Conectando automáticamente en unos segundos (no necesitas recargar la página).</div>
         </div>
       `;
     }
+    // Reintentar automáticamente en 5 segundos sin molestar al usuario
+    setTimeout(() => {
+      if (userEmp === '9997') loadBandeja(false, window.bandejaEmails.length > 0);
+    }, 5000);
   } finally {
     bandejaLoading = false;
     if (btn) btn.disabled = false;
@@ -1925,8 +1972,8 @@ function renderBandeja() {
           <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#15803d; border-color:#86efac;" onclick="cambiarEstatusBandeja('${esc(correo.messageId)}', '${esc(f.idClave)}', '${esc(f.uuid)}', 'procesado')" title="Marcar manualmente como ya procesado">
             ✓ Marcar Procesado
           </button>
-          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#64748b;" onclick="cambiarEstatusBandeja('${esc(correo.messageId)}', '${esc(f.idClave)}', '${esc(f.uuid)}', 'descartado')" title="Descartar de la bandeja">
-            ✕
+          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#dc2626; border-color:#fca5a5; background:#fef2f2;" onclick="borrarFacturaBandeja('${esc(correo.messageId)}', '${esc(f.idClave)}', '${esc(f.uuid)}')" title="Borrar permanentemente esta factura recibida por error">
+            🗑️ Borrar
           </button>
           <button class="btn btn-primary" id="btn-proc-${correo.messageId}-${idxOriginal}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="procesarFacturaDesdeBandeja('${esc(correo.messageId)}', ${idxOriginal})">
             ⚡ Procesar a Pago →
@@ -1938,6 +1985,9 @@ function renderBandeja() {
           : '';
         actionBtns = `
           ${revertBtn}
+          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#dc2626; border-color:#fca5a5; background:#fef2f2;" onclick="borrarFacturaBandeja('${esc(correo.messageId)}', '${esc(f.idClave)}', '${esc(f.uuid)}')" title="Borrar permanentemente de la Bandeja">
+            🗑️ Borrar
+          </button>
           <button class="btn btn-outline" id="btn-proc-${correo.messageId}-${idxOriginal}" style="padding:5px 12px; font-size:12px;" onclick="procesarFacturaDesdeBandeja('${esc(correo.messageId)}', ${idxOriginal})" title="Cargar de nuevo en el Flujo de Facturas">
             ⚡ Cargar en Flujo →
           </button>
@@ -2019,6 +2069,9 @@ function renderBandeja() {
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <button class="btn btn-outline" id="btn-dl-all-${correo.messageId}" onclick="descargarTodosArchivosCorreo('${esc(correo.messageId)}')" style="padding:5px 12px; font-size:12px; font-weight:700; color:#1d4ed8; border-color:#93c5fd; background:#eff6ff; display:inline-flex; align-items:center; gap:6px;" title="Descargar XML, PDF de factura y todos los anexos de este correo a tu carpeta de Descargas">
               ⬇️ Descargar Todo (${totalArchivosCorreo})
+            </button>
+            <button class="btn btn-outline" onclick="borrarCorreoBandeja('${esc(correo.messageId)}')" style="padding:5px 11px; font-size:12px; font-weight:700; color:#dc2626; border-color:#fca5a5; background:#fef2f2; display:inline-flex; align-items:center; gap:5px;" title="Borrar permanentemente este correo de la Bandeja de Entrada">
+              🗑️ Borrar
             </button>
             <div class="bandeja-date-badge">📅 ${fmtEmailDate(correo.fechaMs)}</div>
           </div>
@@ -2147,9 +2200,56 @@ async function cambiarEstatusBandeja(messageId, idClave, uuid, nuevoEstatus) {
         }
       }
     }
+    saveBandejaInstantCache(window.bandejaEmails);
     renderBandeja();
   } catch (err) {
     alert('Error de red al cambiar estatus: ' + err.message);
+  }
+}
+
+async function borrarFacturaBandeja(messageId, idClave, uuid) {
+  if (!confirm('¿Deseas borrar permanentemente esta factura de tu Bandeja de Entrada?')) return;
+  try {
+    // Eliminar al instante de la pantalla y de la caché local
+    window.bandejaEmails = window.bandejaEmails.map(c => {
+      if (c.messageId !== messageId) return c;
+      return {
+        ...c,
+        facturas: (c.facturas || []).filter(f => {
+          if (uuid && f.uuid === uuid) return false;
+          if (idClave && f.idClave === idClave) return false;
+          return true;
+        })
+      };
+    }).filter(c => (c.facturas || []).length > 0);
+    saveBandejaInstantCache(window.bandejaEmails);
+    bandejaLastSignature = getBandejaSignature(window.bandejaEmails);
+    renderBandeja();
+
+    await fetch('/api/mail/estatus', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId, idClave, uuid, estatus: 'borrado' })
+    });
+  } catch (err) {
+    console.error('Error al borrar factura de bandeja:', err);
+  }
+}
+
+async function borrarCorreoBandeja(messageId) {
+  if (!confirm('¿Deseas borrar permanentemente este correo de tu Bandeja de Entrada?')) return;
+  try {
+    // Eliminar al instante de la pantalla y de la caché local
+    window.bandejaEmails = window.bandejaEmails.filter(c => c.messageId !== messageId);
+    saveBandejaInstantCache(window.bandejaEmails);
+    bandejaLastSignature = getBandejaSignature(window.bandejaEmails);
+    renderBandeja();
+
+    await fetch(`/api/mail/correo/${encodeURIComponent(messageId)}`, {
+      method: 'DELETE'
+    });
+  } catch (err) {
+    console.error('Error al borrar correo de bandeja:', err);
   }
 }
 

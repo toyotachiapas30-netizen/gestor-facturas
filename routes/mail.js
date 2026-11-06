@@ -479,12 +479,17 @@ router.get('/inbox', async (req, res) => {
 
     const estadosRows = db.prepare('SELECT id_clave, uuid, message_id, estatus FROM bandeja_estado').all();
     const estadoByClave = new Map();
+    const correosBorrados = new Set();
     for (const e of estadosRows) {
       if (e.id_clave) estadoByClave.set(String(e.id_clave).trim().toUpperCase(), e.estatus);
       if (e.uuid) estadoByClave.set(String(e.uuid).trim().toUpperCase(), e.estatus);
+      if (e.estatus === 'borrado' && e.message_id && (!e.uuid || String(e.id_clave).startsWith('MSG_'))) {
+        correosBorrados.add(String(e.message_id).trim());
+      }
     }
 
     const correos = [];
+    let cacheDirty = false;
 
     // Procesar mensajes en lotes pequeños para máxima velocidad sin saturar Gmail API
     const BATCH_SIZE = 6;
@@ -492,6 +497,8 @@ router.get('/inbox', async (req, res) => {
       const slice = messages.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.all(slice.map(async (m) => {
         try {
+          if (correosBorrados.has(m.id)) return null;
+
           const cached = getCacheStmt.get(m.id);
           if (cached && cached.data_json) {
             const parsedCache = JSON.parse(cached.data_json);
@@ -568,6 +575,7 @@ router.get('/inbox', async (req, res) => {
           if (xmlParts.length === 0) {
             try {
               setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 4, messageId: m.id, noInvoice: true, facturas: [] }));
+              cacheDirty = true;
             } catch (e) {}
             return null;
           }
@@ -606,6 +614,7 @@ router.get('/inbox', async (req, res) => {
 
           try {
             setCacheStmt.run(m.id, internalDateMs, JSON.stringify(emailItem));
+            cacheDirty = true;
           } catch (cacheErr) {}
 
           return emailItem;
@@ -620,11 +629,17 @@ router.get('/inbox', async (req, res) => {
       }
     }
 
+    if (cacheDirty) {
+      backupDatabaseToDrive().catch(e => console.warn('⚠️ Error respaldando caché de bandeja:', e.message));
+    }
+
     const role = getGestorRole(req);
 
     // Enriquecer cada factura con su estatus actual (Automático por BD Gastos + Manual)
     const correosEnriquecidos = [];
     for (const c of correos) {
+      if (correosBorrados.has(c.messageId)) continue;
+
       // Excluir correos de Google Payments / Google Cloud México
       const senderCheck = `${c.fromName || ''} ${c.fromEmail || ''} ${c.subject || ''}`.toLowerCase();
       if (senderCheck.includes('google payments') || senderCheck.includes('payments-noreply@google.com')) {
@@ -654,6 +669,8 @@ router.get('/inbox', async (req, res) => {
         const gastoMatch = uuidUpper ? gastosByUuid.get(uuidUpper) : null;
         const manualStatus = estadoByClave.get(uuidUpper) || estadoByClave.get(claveUpper) || null;
 
+        if (manualStatus === 'borrado') return null;
+
         let estatus = 'pendiente';
         let origenEstatus = 'pendiente';
         let sucursalFinal = f.sucursal || 'Toyota Chiapas';
@@ -679,7 +696,9 @@ router.get('/inbox', async (req, res) => {
           gastoId: gastoMatch ? gastoMatch.id : null,
           estatusPagoGasto: gastoMatch ? gastoMatch.estatus : null
         };
-      });
+      }).filter(Boolean);
+
+      if (facturasConEstatus.length === 0) continue;
 
       // Si el usuario tiene rol restringido (oriente / poniente), adaptar o filtrar
       if (role === 'poniente') {
@@ -814,7 +833,7 @@ router.get('/attachment/:messageId/:attachmentId', async (req, res) => {
 });
 
 // ── PATCH /api/mail/estatus ───────────────────────────────
-// Cambia manualmente el estatus de una factura en la Bandeja (pendiente | procesado | descartado)
+// Cambia manualmente el estatus de una factura en la Bandeja (pendiente | procesado | descartado | borrado)
 router.patch('/estatus', async (req, res) => {
   try {
     if (!isAuthorizedBandejaUser(req)) {
@@ -824,7 +843,7 @@ router.patch('/estatus', async (req, res) => {
     if (!idClave && !uuid) {
       return res.status(400).json({ ok: false, error: 'Falta identificador de la factura (idClave o uuid).' });
     }
-    const valid = ['pendiente', 'procesado', 'descartado'];
+    const valid = ['pendiente', 'procesado', 'descartado', 'borrado'];
     if (!valid.includes(estatus)) {
       return res.status(400).json({ ok: false, error: 'Estatus inválido.' });
     }
@@ -844,6 +863,51 @@ router.patch('/estatus', async (req, res) => {
     backupDatabaseToDrive().catch(e => console.warn('⚠️ Error respaldando estado de bandeja:', e.message));
 
     return res.json({ ok: true, idClave: clave, estatus });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── DELETE /api/mail/correo/:messageId ────────────────────
+// Borra permanentemente un correo completo (y todas sus facturas) de la Bandeja de Entrada
+router.delete('/correo/:messageId', async (req, res) => {
+  try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).json({ ok: false, error: 'Acceso exclusivo para el trabajador 9997.' });
+    }
+    const messageId = String(req.params.messageId || '').trim();
+    if (!messageId) {
+      return res.status(400).json({ ok: false, error: 'Falta el messageId del correo.' });
+    }
+
+    const db = getDB();
+    const upsertStmt = db.prepare(`
+      INSERT INTO bandeja_estado (id_clave, message_id, uuid, estatus, updated_at)
+      VALUES (?, ?, ?, 'borrado', datetime('now','localtime'))
+      ON CONFLICT(id_clave) DO UPDATE SET
+        estatus = 'borrado',
+        updated_at = excluded.updated_at
+    `);
+
+    upsertStmt.run(`MSG_${messageId}`.toUpperCase(), messageId, '');
+
+    // También marcar como borradas todas las facturas asociadas a este correo en caché
+    try {
+      const cached = db.prepare('SELECT data_json FROM bandeja_cache WHERE message_id = ?').get(messageId);
+      if (cached && cached.data_json) {
+        const parsed = JSON.parse(cached.data_json);
+        for (const f of (parsed.facturas || [])) {
+          const clave = String(f.uuid || f.idClave || '').trim().toUpperCase();
+          if (clave) {
+            upsertStmt.run(clave, messageId, String(f.uuid || '').toUpperCase());
+          }
+        }
+      }
+    } catch (e) {}
+
+    backupDatabaseToDrive().catch(e => console.warn('⚠️ Error respaldando borrado de correo:', e.message));
+
+    return res.json({ ok: true, messageId });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }

@@ -376,6 +376,12 @@ app.get('*', (req, res) => {
 });
 
 async function startServer() {
+  // Abrir el puerto de inmediato para evitar timeouts en el balanceador de Render
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n✅ SERVIDOR ACTUALIZADO`);
+    console.log(`🚀 Corriendo en puerto: ${PORT}`);
+  });
+
   // 1. Restaurar base de datos SQLite desde Google Drive
   try {
     const { restoreDatabaseFromDrive } = require('./routes/gastos');
@@ -384,18 +390,19 @@ async function startServer() {
     console.error('⚠️ Error al restaurar base de datos desde Google Drive:', err.message);
   }
 
-  app.listen(PORT, '0.0.0.0', async () => {
-    console.log(`\n✅ SERVIDOR ACTUALIZADO`);
-    console.log(`🚀 Corriendo en puerto: ${PORT}`);
+  // 2. Restaurar tokens de Google desde la base de datos
+  try {
+    const { restoreTokensFromDatabase } = require('./routes/drive');
+    await restoreTokensFromDatabase();
+  } catch (err) {
+    console.error('⚠️ Error al iniciar restauración de tokens:', err.message);
+  }
 
-    // 2. Restaurar tokens de Google desde la base de datos en el arranque del servidor
-    try {
-      const { restoreTokensFromDatabase } = require('./routes/drive');
-      await restoreTokensFromDatabase();
-    } catch (err) {
-      console.error('⚠️ Error al iniciar restauración de tokens:', err.message);
-    }
-  });
+  // 3. Auto-Ping Keep-Alive externo cada 9 minutos para evitar reposo en Render
+  const publicUrl = process.env.RENDER_EXTERNAL_URL || 'https://gestor-facturas-hrwq.onrender.com';
+  setInterval(() => {
+    fetch(`${publicUrl}/ping`).catch(() => {});
+  }, 9 * 60 * 1000);
 }
 
 startServer();
