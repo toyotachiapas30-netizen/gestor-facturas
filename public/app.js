@@ -325,7 +325,7 @@ async function verificarSAT() {
   document.getElementById('sat-badge').style.display='flex';
   document.getElementById('sat-details').innerHTML='';
   document.getElementById('btn-print-sat').style.display='none';
-  document.getElementById('btn-next1').disabled=true;
+  document.getElementById('btn-next1').disabled=false;
 
   // Verificar estado de la llave de Gemini IA en paralelo
   checkGeminiStatus();
@@ -442,6 +442,24 @@ function b64ToBlob(b64Data, contentType = 'application/pdf') {
 }
 
 function mostrarResultadoCapturaSAT(data) {
+  hideErr('err-step1');
+  state.satOk = true;
+  const btnNext1 = document.getElementById('btn-next1');
+  if (btnNext1) btnNext1.disabled = false;
+
+  // Asegurar que el badge superior también muestre Vigente si el SOAP falló mientras reiniciaba
+  const badge = document.getElementById('sat-badge');
+  if (badge) {
+    badge.style.display = 'flex';
+    badge.className = 'badge vigente';
+    const icon = document.getElementById('sat-icon');
+    const title = document.getElementById('sat-title');
+    const sub = document.getElementById('sat-sub');
+    if (icon) icon.textContent = '✅';
+    if (title) title.textContent = 'CFDI Vigente (Validado en Portal Oficial SAT)';
+    if (sub && !sub.textContent) sub.textContent = 'Sello CFDI Válido — Consulta por archivo XML';
+  }
+
   const manualBox = document.getElementById('sat-manual-captcha-box');
   if (manualBox) manualBox.style.display = 'none';
 
