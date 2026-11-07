@@ -241,14 +241,18 @@
         <span class="step-label" id="lbl-0" onclick="goTo(0)" style="cursor:pointer">1. Archivos</span>
         <span class="step-label" id="lbl-1" onclick="goTo(1)" style="cursor:pointer">2. SAT</span>
         <span class="step-label" id="lbl-2" onclick="goTo(2)" style="cursor:pointer">3. Drive</span>
-        <span class="step-label" id="lbl-3" onclick="goTo(3)" style="cursor:pointer">4. Contrarec.</span>
+        <span class="step-label" id="lbl-3" onclick="goTo(3)" style="cursor:pointer">4. Nube 1</span>
+        <span class="step-label" id="lbl-4" onclick="goTo(4)" style="cursor:pointer">5. Nube 2</span>
+        <span class="step-label" id="lbl-5" onclick="goTo(5)" style="cursor:pointer">6. Contrarec.</span>
       </div>
-      <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:25%"></div></div>
+      <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:16.6%"></div></div>
       <div class="step-dots">
         <div class="dot active" id="dot-0" onclick="goTo(0)" style="cursor:pointer"></div>
         <div class="dot" id="dot-1" onclick="goTo(1)" style="cursor:pointer"></div>
         <div class="dot" id="dot-2" onclick="goTo(2)" style="cursor:pointer"></div>
         <div class="dot" id="dot-3" onclick="goTo(3)" style="cursor:pointer"></div>
+        <div class="dot" id="dot-4" onclick="goTo(4)" style="cursor:pointer"></div>
+        <div class="dot" id="dot-5" onclick="goTo(5)" style="cursor:pointer"></div>
       </div>
     </div>
 
@@ -470,28 +474,211 @@
           </button>
         </div>
         <div class="nav-btns"><div></div>
-          <button class="btn btn-primary" id="btn-next2" disabled onclick="goTo(3)">Llenar Contrarecibo →</button>
+          <button class="btn btn-primary" id="btn-next2" onclick="goTo(3)">Nube 1 (Buzón Autotec) →</button>
         </div>
       </div>
     </div>
 
     <!-- ══════════════════════════════════════════
-         PASO 4 — Contrarecibo Google Sheets
+         PASO 4 — Nube 1: Buzón Autotec (buzonfecg.aspx) + Correo de Confirmación
     ═══════════════════════════════════════════ -->
     <div class="step-panel" id="step-3">
       <div class="card">
+        <div class="sec-title">📬 Paso 4 — Nube 1: Buzón Autotec y Correo de Confirmación</div>
+        <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px;">
+          Sube automáticamente el XML y el PDF a <code>autotec.farrera.net:60002/buzonfecg.aspx</code> y obtiene la captura real y el correo de confirmación.
+        </p>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:16px;">
+          <div class="field" style="margin:0;">
+            <label>Nombre (Buzón)</label>
+            <input type="text" id="inp-buzon-nombre" value="YONI JAVIER RUIZ DOMINGUEZ" />
+          </div>
+          <div class="field" style="margin:0;">
+            <label>Teléfono (Corregido)</label>
+            <input type="text" id="inp-buzon-telefono" value="8718645133" />
+          </div>
+          <div class="field" style="margin:0;">
+            <label>Correo para Confirmación</label>
+            <input type="text" id="inp-buzon-correo" value="chiapastoyota@gmail.com" />
+          </div>
+          <div class="field" style="margin:0;">
+            <label>Orden de Compra (Opcional)</label>
+            <input type="text" id="inp-orden-compra" placeholder="Opcional" />
+          </div>
+        </div>
+
+        <div class="alert err" id="err-step3"><span>⚠️</span><span id="err-step3-msg"></span></div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+          <button class="btn btn-primary" id="btn-buzon" onclick="subirBuzon(false)" style="background:#0284c7; border-color:#0284c7;">
+            <span class="spinner" id="spin-buzon"></span> 🚀 Subir y Registrar en Buzón (Nube 1)
+          </button>
+          <button class="btn btn-outline" id="btn-buzon-correo" onclick="capturarCorreoConfirmacionBuzon()" style="border-color:#0284c7; color:#0369a1; font-weight:700;">
+            <span class="spinner" id="spin-buzon-correo"></span> 📧 Capturar Correo de Confirmación (notifica@gfarrera)
+          </button>
+          <button class="btn btn-outline" onclick="window.open('https://autotec.farrera.net:60002/buzonfecg.aspx', '_blank')" style="font-size:12px;">
+            🌐 Abrir Buzón Manual ↗
+          </button>
+        </div>
+
+        <!-- Resultado Buzón Nube 1 -->
+        <div id="buzon-result" style="display:none; background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:14px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:800; color:#0f172a; font-size:14px;" id="buzon-result-title">✅ Pantalla de Buzón Autotec Capturada</div>
+              <div style="font-size:12px; color:#475569;" id="buzon-result-sub">Se guardó automáticamente en la carpeta del proveedor en Drive.</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-outline" onclick="descargarPdfEvidencia('buzon')" style="padding:6px 12px; font-size:12px;">📥 Descargar PDF Buzón</button>
+              <button class="btn btn-primary" onclick="imprimirPdfEvidencia('buzon')" style="padding:6px 12px; font-size:12px;">🖨️ Imprimir</button>
+            </div>
+          </div>
+          <div style="max-height:380px; overflow-y:auto; text-align:center; border:1px solid #e2e8f0; border-radius:8px; background:#fff; padding:6px;">
+            <img id="buzon-screenshot" src="" alt="Captura Buzón" style="max-width:100%; height:auto; border-radius:6px;" />
+          </div>
+        </div>
+
+        <!-- Resultado Correo de Confirmación -->
+        <div id="buzon-mail-result" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:14px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:800; color:#15803d; font-size:14px;" id="buzon-mail-title">✅ Correo de Confirmación Capturado</div>
+              <div style="font-size:12px; color:#166534;" id="buzon-mail-sub">Factura electrónica registrada — notifica@gfarrera.com.mx</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-outline" onclick="descargarPdfEvidencia('correoBuzon')" style="padding:6px 12px; font-size:12px; border-color:#16a34a; color:#15803d;">📥 Descargar PDF Correo</button>
+              <button class="btn btn-primary" onclick="imprimirPdfEvidencia('correoBuzon')" style="padding:6px 12px; font-size:12px; background:#16a34a; border-color:#16a34a;">🖨️ Imprimir Correo</button>
+            </div>
+          </div>
+          <div style="max-height:380px; overflow-y:auto; text-align:center; border:1px solid #dcfce7; border-radius:8px; background:#fff; padding:6px;">
+            <img id="buzon-mail-screenshot" src="" alt="Captura Correo Confirmación" style="max-width:100%; height:auto; border-radius:6px;" />
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; margin-top:16px;">
+          <button class="btn btn-secondary" onclick="goTo(2)">← Volver a Drive</button>
+          <button class="btn btn-primary" id="btn-next3" onclick="goTo(4)">Nube 2 (EnvioFacturasGastos) →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         PASO 5 — Nube 2: Portal EnvioFacturasGastos
+    ═══════════════════════════════════════════ -->
+    <div class="step-panel" id="step-4">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+          <div>
+            <div class="sec-title" style="margin:0; display:flex; align-items:center; gap:8px;">
+              <span>🚀 Paso 5 — Nube 2: Portal EnvioFacturasGastos</span>
+              <span id="portal-auth-badge" style="font-size:11px; padding:2px 9px; border-radius:999px; background:#e2e8f0; color:#475569;">Verificando acceso...</span>
+            </div>
+            <p style="font-size:13px;color:var(--text-sub);margin:4px 0 0;">
+              Inicia sesión automáticamente en <code>autotec.farrera.net/EnvioFacturasGastos</code>, marca <strong>únicamente</strong> la casilla de esta factura, la envía y toma la captura real.
+            </p>
+          </div>
+          <button class="btn btn-outline" onclick="togglePortalConfigBox()" style="padding:7px 12px; font-size:12px;">
+            🔑 Configurar Acceso Autotec
+          </button>
+        </div>
+
+        <!-- Caja para guardar Usuario y Contraseña de Autotec una sola vez -->
+        <div id="portal-config-box" style="display:none; background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:14px; margin-bottom:16px;">
+          <div style="font-size:12.5px; color:#334155; margin-bottom:10px;">
+            <strong>Guarda tu Usuario y Contraseña de Autotec una sola vez:</strong> Quedarán respaldados en tu servidor para que el robot inicie sesión automáticamente en <em>VALOR FARRERA AUTOMOTRIZ S. DE R.L. DE C.V.</em>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; align-items:end;">
+            <div class="field" style="margin:0;">
+              <label style="font-size:11px;">Usuario Autotec</label>
+              <input type="text" id="inp-portal-user" placeholder="Tu usuario" />
+            </div>
+            <div class="field" style="margin:0;">
+              <label style="font-size:11px;">Contraseña Autotec</label>
+              <input type="password" id="inp-portal-pass" placeholder="••••••••" />
+            </div>
+            <button class="btn btn-primary" onclick="guardarCredencialesPortal()" style="background:#16a34a; border-color:#16a34a; padding:10px 16px; font-size:13px; font-weight:700;">
+              💾 Guardar Acceso
+            </button>
+          </div>
+          <div id="portal-config-msg" style="font-size:12px; margin-top:8px; display:none;"></div>
+        </div>
+
+        <div class="alert err" id="err-step4"><span>⚠️</span><span id="err-step4-msg"></span></div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+          <button class="btn btn-outline" id="btn-portal-preview" onclick="ejecutarPortalNube2(true)" style="border-color:#2563eb; color:#1d4ed8; font-weight:700;">
+            <span class="spinner" id="spin-portal-prev"></span> 👁️ 1. Buscar y Previsualizar Selección
+          </button>
+          <button class="btn btn-primary" id="btn-portal-send" onclick="ejecutarPortalNube2(false)" style="background:#16a34a; border-color:#16a34a; font-weight:700;">
+            <span class="spinner" id="spin-portal-send"></span> 📤 2. Marcar Factura, Enviar y Capturar (Nube 2)
+          </button>
+          <button class="btn btn-outline" onclick="window.open('https://autotec.farrera.net/EnvioFacturasGastos/', '_blank')" style="font-size:12px;">
+            🌐 Abrir EnvioFacturasGastos ↗
+          </button>
+        </div>
+
+        <!-- Resultado Nube 2 -->
+        <div id="portal-result" style="display:none; background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:14px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:800; color:#0f172a; font-size:14px;" id="portal-result-title">✅ Captura Real de EnvioFacturasGastos (Nube 2)</div>
+              <div style="font-size:12px; color:#475569;" id="portal-result-sub"></div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-outline" onclick="descargarPdfEvidencia('portal')" style="padding:6px 12px; font-size:12px;">📥 Descargar PDF Nube 2</button>
+              <button class="btn btn-primary" onclick="imprimirPdfEvidencia('portal')" style="padding:6px 12px; font-size:12px;">🖨️ Imprimir</button>
+            </div>
+          </div>
+          <div style="max-height:420px; overflow-y:auto; text-align:center; border:1px solid #e2e8f0; border-radius:8px; background:#fff; padding:6px;">
+            <img id="portal-screenshot" src="" alt="Captura Nube 2" style="max-width:100%; height:auto; border-radius:6px;" />
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; margin-top:16px;">
+          <button class="btn btn-secondary" onclick="goTo(3)">← Volver a Nube 1</button>
+          <button class="btn btn-primary" id="btn-next4" onclick="goTo(5)">Llenar Contrarecibo →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         PASO 6 — Contrarecibo Google Sheets
+    ═══════════════════════════════════════════ -->
+    <div class="step-panel" id="step-5">
+      <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-          <div class="sec-title" style="margin:0;">📑 Paso 4 — Contrarecibo</div>
+          <div class="sec-title" style="margin:0;">📑 Paso 6 — Contrarecibo (Google Sheets + PDF 1 Hoja)</div>
           <div id="active-branch-indicator" style="font-size:11px; font-weight:700; color:#eb0a1e; background:rgba(235,10,30,0.06); padding:4px 12px; border-radius:20px; border:1px solid rgba(235,10,30,0.1);">
             📍 Sucursal: <span id="active-branch-name">...</span>
           </div>
         </div>
         
-        <p style="font-size:13px;color:var(--text-sub);margin-bottom:14px;">Genera el contrarecibo automático en Google Sheets.</p>
+        <p style="font-size:13px;color:var(--text-sub);margin-bottom:14px;">
+          Actualiza directamente la hoja del proveedor (fecha de elaboración en <code>S6</code>, limpia facturas anteriores, fecha sin hora en <code>I40</code>, fila 40 a <code>38 px</code>) y genera el PDF oficial de 1 sola página.
+        </p>
         
-        <div style="display:flex; justify-content:space-between; align-items:flex-end;">
-          <button class="btn btn-secondary" onclick="goTo(2)">← Volver</button>
-          <button class="btn btn-primary" id="btn-sheets-preview" onclick="previewSheet()" style="background:#1e293b">👁️ Previsualizar</button>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+          <button class="btn btn-secondary" onclick="goTo(4)">← Volver a Nube 2</button>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-outline" id="btn-banxico-fix" onclick="consultarBanxicoFIX()" style="border-color:#0d9488; color:#0f766e; font-weight:700; font-size:12px;">
+              <span class="spinner" id="spin-banxico"></span> 💵 Obtener Tipo de Cambio FIX Banxico (Para USD / Pattison)
+            </button>
+            <button class="btn btn-primary" id="btn-sheets-preview" onclick="previewSheet()" style="background:#1e293b">👁️ Previsualizar</button>
+          </div>
+        </div>
+
+        <!-- Panel de Tipo de Cambio Banxico (visible cuando es USD o cuando se consulta) -->
+        <div id="banxico-box" style="display:none; margin-top:16px; padding:14px; background:#f0fdfa; border:1px solid #99f6e4; border-radius:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+              <label style="font-size:12.5px; font-weight:700; color:#0f766e; margin:0;">Tipo de Cambio FIX Banxico (L40):</label>
+              <input type="number" step="0.0001" id="inp-tipo-cambio" placeholder="Ej: 18.6425" style="width:140px; padding:7px 10px; font-weight:800; border:1px solid #5eead4; border-radius:8px;" />
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-outline" onclick="descargarPdfEvidencia('banxico')" style="padding:6px 12px; font-size:12px; border-color:#0d9488; color:#0f766e;">📥 Descargar Captura Banxico</button>
+            </div>
+          </div>
         </div>
         
         <div class="field" style="margin-top:20px;">
@@ -509,12 +696,12 @@
 
         <div id="sheet-preview" style="display:none; margin-top:24px;">
           <div style="background:rgba(30,41,59,0.03); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:20px;">
-            <div style="font-size:12px; font-weight:700; color:var(--text-sub); text-transform:uppercase; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:6px;">Resumen de llenado</div>
+            <div style="font-size:12px; font-weight:700; color:var(--text-sub); text-transform:uppercase; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:6px;">Resumen de llenado directo en hoja del proveedor</div>
             <div class="cfdi-grid" style="grid-template-columns:repeat(2,1fr); gap:12px;">
               <div class="cfield"><div class="clabel">D40 — No. Factura</div><div class="cval" id="prev-nofact">—</div></div>
-              <div class="cfield"><div class="clabel">I40 — Fecha</div><div class="cval" id="prev-fecha">—</div></div>
+              <div class="cfield"><div class="clabel">I40 — Fecha (Sin hora)</div><div class="cval" id="prev-fecha">—</div></div>
               <div class="cfield"><div class="clabel">J40 — Importe</div><div class="cval total" id="prev-importe">—</div></div>
-              <div class="cfield"><div class="clabel">L40 — Concepto</div><div class="cval" id="prev-concepto">—</div></div>
+              <div class="cfield"><div class="clabel">L40 / N40 — Concepto</div><div class="cval" id="prev-concepto">—</div></div>
             </div>
           </div>
         </div>
@@ -524,7 +711,7 @@
         </div>
         <div class="field">
           <label>Concepto del Gasto</label>
-          <textarea id="inp-concepto" placeholder="Ej: Pago de servicio de mantenimiento mes de marzo 2026"></textarea>
+          <textarea id="inp-concepto" placeholder="Ej: Pago de servicio de mantenimiento mes de noviembre 2026"></textarea>
         </div>
         <div class="field">
           <label>Categoría del Gasto *</label>
@@ -533,25 +720,34 @@
           </select>
         </div>
 
-        <div id="sheets-result" style="display:none">
-          <div class="badge vigente">
-            <div class="badge-icon">✅</div>
-            <div><div class="badge-title">Contrarecibo llenado correctamente</div><div class="badge-sub" id="sheets-link-wrap">—</div></div>
+        <div id="sheets-result" style="display:none; margin-bottom:16px;">
+          <div class="badge vigente" style="justify-content:space-between; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div class="badge-icon">✅</div>
+              <div>
+                <div class="badge-title">Contrarecibo actualizado en la hoja del proveedor y subido a Drive</div>
+                <div class="badge-sub" id="sheets-link-wrap">—</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-outline" id="btn-dl-contrarecibo" onclick="descargarPdfEvidencia('contrarecibo')" style="display:none; border-color:#16a34a; color:#15803d; font-weight:700; padding:6px 12px; font-size:12px;">📥 Descargar PDF Contrarecibo (1 Pág)</button>
+              <button class="btn btn-primary" id="btn-print-contrarecibo" onclick="imprimirPdfEvidencia('contrarecibo')" style="display:none; background:#16a34a; border-color:#16a34a; font-weight:700; padding:6px 12px; font-size:12px;">🖨️ Imprimir Contrarecibo</button>
+            </div>
           </div>
         </div>
 
         <div class="alert err" id="err-step6"><span>⚠️</span><span id="err-step6-msg"></span></div>
 
         <div class="btn-row">
-          <button class="btn btn-primary" id="btn-sheets-fill" style="display:none" onclick="llenarSheet()"><span class="spin" id="spin-sheets" style="display:none"></span>📊 Llenar y Imprimir</button>
+          <button class="btn btn-primary" id="btn-sheets-fill" style="display:none" onclick="llenarSheet()"><span class="spin" id="spin-sheets" style="display:none"></span>📊 Llenar Hoja, Subir PDF a Drive e Imprimir</button>
         </div>
 
         <!-- Final success -->
           <div id="final-success" class="row" style="margin-top:40px; justify-content:center; display:none;">
             <div style="text-align:center;">
               <div style="font-size:50px;margin-bottom:20px;">🎉</div>
-              <h2 style="margin-bottom:8px">¡Proceso Finalizado!</h2>
-              <p style="color:var(--text-sub);margin-bottom:32px">La factura ha sido validada, subida a Drive y registrada en Gastos.</p>
+              <h2 style="margin-bottom:8px">¡Expediente y Proceso Finalizado!</h2>
+              <p style="color:var(--text-sub);margin-bottom:32px">La factura fue validada en SAT, subida a Drive, registrada en Nube 1 y Nube 2, y su Contrarecibo está listo.</p>
               <button class="btn btn-primary" onclick="resetFlow()">🔄 Procesar otra factura</button>
             </div>
           </div>
