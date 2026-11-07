@@ -336,6 +336,11 @@ async function verificarSAT() {
 
     state.satOk = estado==='vigente';
     document.getElementById('btn-next1').disabled=false;
+
+    // Lanzar automáticamente la Captura Real del SAT al entrar al Paso 2
+    if (state.satOk && !state.satPdfBlob && state.xmlFile) {
+      generarCapturaRealSAT();
+    }
   } catch(err) {
     showErr('err-step1', 'No se pudo conectar: '+err.message);
     document.getElementById('sat-badge').style.display='none';

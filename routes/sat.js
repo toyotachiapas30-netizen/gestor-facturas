@@ -54,40 +54,47 @@ function saveGeminiApiKey(apiKey) {
 
 // ── Resolver Captcha del SAT con Gemini Vision ─────────────────────────────
 async function solveCaptchaWithGemini(captchaBase64, apiKey) {
-  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+  const models = [
+    { name: 'gemini-3-flash-preview', thinkingLevel: 'LOW' },
+    { name: 'gemini-3.8-flash', thinkingLevel: 'LOW' },
+    { name: 'gemini-3.1-pro-preview', thinkingLevel: 'LOW' }
+  ];
   let lastErr = null;
 
-  for (const model of models) {
+  for (const m of models) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      const resp = await axios.post(
-        url,
-        {
-          contents: [
-            {
-              parts: [
-                {
-                  text: 'Lee exactamente los 5 dígitos numéricos (del 0 al 9) que aparecen en este captcha del SAT. Ignora la cuadrícula y las líneas diagonales de fondo. Responde ÚNICAMENTE con los 5 números juntos, sin espacios ni explicación.'
-                },
-                {
-                  inline_data: {
-                    mime_type: 'image/png',
-                    data: captchaBase64
-                  }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m.name}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const body = {
+        contents: [
+          {
+            parts: [
+              {
+                text: 'Lee exactamente los 5 dígitos numéricos (0-9) de este captcha del SAT mexicano. Nota importante sobre la tipografía del SAT: los dígitos están inclinados hacia la izquierda; el número 7 tiene una barra superior horizontal larga (no lo confundas con 1), el 3 tiene dos curvas, el 2 tiene base plana. Ignora la malla de fondo y las líneas diagonales. Responde ÚNICAMENTE con los 5 dígitos juntos, sin espacios ni texto adicional.'
+              },
+              {
+                inline_data: {
+                  mime_type: 'image/png',
+                  data: captchaBase64
                 }
-              ]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.0,
-            maxOutputTokens: 15
+              }
+            ]
           }
-        },
-        { timeout: 12000 }
-      );
+        ],
+        generationConfig: {
+          temperature: 0.0
+        }
+      };
+      if (m.thinkingLevel) {
+        body.generationConfig.thinkingConfig = { thinkingLevel: m.thinkingLevel };
+      }
 
-      const rawText = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const digitsOnly = rawText.replace(/[^0-9A-Za-z]/g, '').trim();
+      const resp = await axios.post(url, body, { timeout: 18000 });
+
+      const parts = resp.data?.candidates?.[0]?.content?.parts || [];
+      const rawText = parts.map((p) => p.text || '').join(' ');
+      const digitsMatch = rawText.match(/\d{5}/);
+      if (digitsMatch) return digitsMatch[0];
+      const digitsOnly = rawText.replace(/[^0-9]/g, '').trim();
       if (digitsOnly.length >= 4) {
         return digitsOnly.slice(0, 5);
       }
@@ -353,14 +360,14 @@ router.post('/captura-xml', upload.single('xml'), async (req, res) => {
     await page.waitForSelector('#ctl00_MainContent_ImgCaptchaXml', { visible: true, timeout: 10000 });
     await new Promise((r) => setTimeout(r, 500));
 
-    // 3. Si tenemos Gemini API Key configurada, intentar resolver automáticamente (hasta 3 intentos)
+    // 3. Si tenemos Gemini API Key configurada, intentar resolver automáticamente (hasta 4 intentos)
     let geminiErrorMsg = null;
     if (geminiKey) {
-      for (let intento = 1; intento <= 3; intento++) {
+      for (let intento = 1; intento <= 4; intento++) {
         try {
           const captchaEl = await page.$('#ctl00_MainContent_ImgCaptchaXml');
           const capB64 = await captchaEl.screenshot({ encoding: 'base64' });
-          console.log(`🤖 [SAT Robot] Leyendo Captcha con Gemini (intento ${intento}/3)...`);
+          console.log(`🤖 [SAT Robot] Leyendo Captcha con Gemini (intento ${intento}/4)...`);
           const codigoLeido = await solveCaptchaWithGemini(capB64, geminiKey);
           console.log(`🔢 [SAT Robot] Gemini leyó: "${codigoLeido}"`);
 
