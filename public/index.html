@@ -329,45 +329,98 @@
 
         <div class="alert err" id="err-step1"><span>⚠️</span><span id="err-step1-msg"></span></div>
 
-        <!-- 🪄 MAGIC BOOKMARKLET ASSISTANT -->
-        <div id="magic-assistant" style="margin-top:20px; padding:20px; background:linear-gradient(135deg, rgba(235,10,30,0.05), rgba(30,41,59,0.05)); border:2px solid #eb0a1e; border-radius:12px; position:relative; overflow:hidden;">
-          <div style="position:absolute; top:-10px; right:-10px; font-size:60px; opacity:0.05; pointer-events:none;">🪄</div>
-          <div style="font-size:14px; font-weight:700; color:#eb0a1e; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-            <span>✨</span> ASISTENTE DE AUTO-LLENADO INTELIGENTE
-          </div>
-          
-          <div style="background:#fff; padding:15px; border-radius:8px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom:15px;">
-            <p style="font-size:13px; color:#475569; margin-bottom:12px; line-height:1.4;">
-              <strong>Instrucciones (Solo una vez):</strong> Arrastra el botón rojo de abajo a tu <b>barra de marcadores</b> de Chrome (arriba).
-            </p>
-            <div style="text-align:center; padding:10px; border:2px dashed #cbd5e1; border-radius:8px; background:#f8fafc;">
-              <a id="btn-bookmarklet" href="#" class="btn btn-primary" style="cursor:move; text-decoration:none; display:inline-flex; align-items:center; gap:8px; padding:10px 20px; font-size:14px; box-shadow:0 4px 12px rgba(235,10,30,0.3);" onclick="return false;">
-                🚀 LLENAR DATOS SAT
-              </a>
-              <div style="font-size:10px; color:#94a3b8; margin-top:8px;">(Arrástrame hacia arriba a tus marcadores)</div>
+        <!-- 🤖 ROBOT AUTOMÁTICO DE CAPTURA REAL DEL SAT (CONSULTA POR XML + GEMINI IA) -->
+        <div id="sat-robot-card" style="margin-top:18px; padding:18px; background:linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%); border:2px solid #2563eb; border-radius:14px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <div style="font-size:15px; font-weight:800; color:#1e40af; display:flex; align-items:center; gap:8px;">
+                <span>🤖 Captura Real y PDF Oficial del Portal SAT</span>
+                <span id="gemini-status-badge" style="font-size:11px; padding:2px 9px; border-radius:999px; background:#e2e8f0; color:#475569; font-weight:700;">Verificando IA...</span>
+              </div>
+              <div style="font-size:12.5px; color:#475569; margin-top:3px;">
+                Entra a <strong>Consulta por archivo XML</strong> en el portal oficial del SAT, resuelve el Captcha y obtiene el comprobante original listo para Google Drive.
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-outline" onclick="toggleGeminiConfigBox()" style="padding:7px 12px; font-size:12px; border-color:#93c5fd; color:#1d4ed8; background:#fff;">
+                🔑 Configurar Gemini IA
+              </button>
+              <button class="btn btn-primary" id="btn-sat-robot" onclick="generarCapturaRealSAT()" style="background:#2563eb; border-color:#2563eb; padding:8px 16px; font-size:13px; font-weight:700;">
+                <span class="spinner" id="spin-sat-robot"></span> 📸 Obtener Captura Real del SAT
+              </button>
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr; gap:10px;">
-            <button class="btn btn-outline btn-full" style="background:#fff; border-color:#eb0a1e; color:#eb0a1e; font-weight:600;" onclick="window.open('https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx', '_blank')">
-              🌐 1. Abrir Portal SAT Oficial
-            </button>
-            <p style="font-size:12px; color:#64748b; text-align:center; margin-top:5px;">
-              2. Una vez en el SAT, <b>haz clic en el marcador</b> que guardaste arriba.
-            </p>
+          <!-- Configuración de Llave Gratuita de Gemini IA -->
+          <div id="gemini-config-box" style="display:none; background:#fff; border:1px solid #bfdbfe; border-radius:10px; padding:14px; margin-bottom:14px;">
+            <div style="font-size:12.5px; color:#334155; margin-bottom:10px; line-height:1.5;">
+              <strong>Lectura automática de Captchas con Gemini IA (100% Gratis):</strong><br/>
+              1. Abre <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#2563eb; font-weight:700;">Google AI Studio (Crear API Key) ↗</a> con tu cuenta de Google.<br/>
+              2. Haz clic en <strong>"Create API key"</strong>, copia la clave (empieza con <code>AIza...</code>) y pégala aquí abajo una sola vez:
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <input type="password" id="inp-gemini-key" placeholder="Pega aquí tu llave AIzaSy..." style="flex:1; min-width:220px; padding:8px 12px; font-size:13px; font-family:monospace; border:1px solid #cbd5e1; border-radius:8px;" />
+              <button class="btn btn-primary" onclick="guardarGeminiKey()" style="background:#16a34a; border-color:#16a34a; padding:8px 16px; font-size:12.5px; font-weight:700;">
+                💾 Guardar Llave
+              </button>
+            </div>
+            <div id="gemini-key-msg" style="font-size:12px; margin-top:8px; display:none;"></div>
+          </div>
+
+          <!-- Mini-recuadro cuando pide los 5 números del Captcha en pantalla (Respaldo sin salir de la página) -->
+          <div id="sat-manual-captcha-box" style="display:none; background:#fff; border:2px solid #f59e0b; border-radius:10px; padding:14px; margin-bottom:14px;">
+            <div style="font-size:13px; font-weight:700; color:#b45309; margin-bottom:8px;" id="sat-manual-captcha-title">
+              🔢 Escribe los 5 números del Captcha del SAT (sin salir de aquí):
+            </div>
+            <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+              <img id="sat-captcha-img" src="" alt="Captcha SAT" style="height:70px; border-radius:8px; border:1px solid #cbd5e1; background:#f8fafc;" />
+              <input type="text" id="inp-sat-manual-captcha" maxlength="6" placeholder="Ej: 77799" style="width:140px; padding:10px 12px; font-size:18px; font-weight:800; letter-spacing:3px; text-align:center; border:2px solid #94a3b8; border-radius:8px;" onkeydown="if(event.key==='Enter') enviarCaptchaManualSAT()" />
+              <button class="btn btn-primary" id="btn-sat-send-captcha" onclick="enviarCaptchaManualSAT()" style="background:#d97706; border-color:#d97706; padding:10px 18px; font-size:13px; font-weight:700;">
+                ✅ Verificar y Capturar
+              </button>
+            </div>
+          </div>
+
+          <!-- Resultado: Vista Previa de la Captura Real + Botones de Descarga/Impresión -->
+          <div id="sat-real-result-box" style="display:none; background:#fff; border:1px solid #bbf7d0; border-radius:10px; padding:14px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+              <div>
+                <div style="font-size:14px; font-weight:800; color:#15803d;" id="sat-real-result-title">
+                  ✅ Comprobante Oficial del SAT Generado (Consulta por XML)
+                </div>
+                <div style="font-size:12px; color:#166534; margin-top:2px;">
+                  📎 Se subirá automáticamente como PDF oficial a la carpeta del proveedor en el Paso 3 (Drive).
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-outline" onclick="descargarPdfOficialSAT()" style="border-color:#16a34a; color:#15803d; font-weight:700; padding:7px 13px; font-size:12.5px;">
+                  📥 Descargar PDF SAT
+                </button>
+                <button class="btn btn-primary" onclick="imprimirPdfOficialSAT()" style="background:#16a34a; border-color:#16a34a; font-weight:700; padding:7px 13px; font-size:12.5px;">
+                  🖨️ Imprimir PDF SAT
+                </button>
+              </div>
+            </div>
+            <div style="max-height:420px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; text-align:center; padding:8px;">
+              <img id="sat-real-screenshot-img" src="" alt="Captura Real SAT" style="max-width:100%; height:auto; border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.08);" />
+            </div>
           </div>
         </div>
 
         <!-- Back-up copy buttons (hidden by default unless needed) -->
-        <div style="margin-top:15px; text-align:center;">
-          <button class="btn btn-link" style="font-size:11px; color:#94a3b8;" onclick="toggleManualData()">Ver datos para copiar manual (Básico)</button>
+        <div style="margin-top:12px; text-align:center;">
+          <button class="btn btn-link" style="font-size:11px; color:#94a3b8;" onclick="toggleManualData()">Ver asistente manual / datos para copiar</button>
         </div>
         
-        <div id="manual-data-copy" style="display:none; margin-top:10px; padding:10px; background:#f1f5f9; border-radius:8px; font-size:11px;">
-           <div style="display:flex; flex-direction:column; gap:8px;">
-             <div style="display:flex; gap:5px;"><input type="text" id="copy-uuid" readonly style="flex:1; padding:4px;"/><button class="btn btn-sm" onclick="copiarAlPortapapeles('copy-uuid')">Copiar</button></div>
-             <div style="display:flex; gap:5px;"><input type="text" id="copy-rfc-e" readonly style="flex:1; padding:4px;"/><button class="btn btn-sm" onclick="copiarAlPortapapeles('copy-rfc-e')">Copiar</button></div>
-             <div style="display:flex; gap:5px;"><input type="text" id="copy-rfc-r" readonly style="flex:1; padding:4px;"/><button class="btn btn-sm" onclick="copiarAlPortapapeles('copy-rfc-r')">Copiar</button></div>
+        <div id="manual-data-copy" style="display:none; margin-top:10px; padding:12px; background:#f1f5f9; border-radius:8px; font-size:11px;">
+           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+             <div style="display:flex; gap:5px;"><input type="text" id="copy-uuid" readonly style="flex:1; padding:4px;"/><button class="btn btn-sm" onclick="copiarAlPortapapeles('copy-uuid')">Copiar UUID</button></div>
+             <div style="display:flex; gap:5px;"><input type="text" id="copy-rfc-e" readonly style="flex:1; padding:4px;"/><button class="btn btn-sm" onclick="copiarAlPortapapeles('copy-rfc-e')">Copiar RFC Emisor</button></div>
+             <div style="display:flex; gap:5px;"><input type="text" id="copy-rfc-r" readonly style="flex:1; padding:4px;"/><button class="btn btn-sm" onclick="copiarAlPortapapeles('copy-rfc-r')">Copiar RFC Receptor</button></div>
+           </div>
+           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+             <a id="btn-bookmarklet" href="#" class="btn btn-primary" style="cursor:move; text-decoration:none; padding:6px 12px; font-size:12px;" onclick="return false;">🚀 Marcador Auto-Llenado SAT</a>
+             <button class="btn btn-outline" style="padding:6px 12px; font-size:12px;" onclick="window.open('https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx', '_blank')">🌐 Abrir Portal SAT</button>
            </div>
         </div>
 
@@ -377,7 +430,7 @@
            <button class="btn btn-primary" id="btn-sat-verify" onclick="verificarSAT()">
              <span class="spin" id="spin-sat" style="display:none"></span> Verificar en SAT
            </button>
-           <button class="btn btn-success" id="btn-print-sat" style="display:none" onclick="imprimirSAT()"><span class="spin" id="spin-print-sat" style="display:none"></span>🖨️ Imprimir desde SAT</button>
+           <button class="btn btn-success" id="btn-print-sat" style="display:none" onclick="imprimirPdfOficialSAT()"><span class="spin" id="spin-print-sat" style="display:none"></span>🖨️ Imprimir desde SAT</button>
         </div>
         <div class="nav-btns"><div></div>
           <button class="btn btn-primary" id="btn-next1" disabled onclick="goTo(2)">Subir a Drive →</button>

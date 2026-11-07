@@ -253,6 +253,16 @@ function renderCFDI() {
   document.getElementById('d-ver').textContent     = c.version;
   document.getElementById('d-moneda').textContent  = c.moneda;
   document.getElementById('d-total').textContent   = fmtMonto(c.total, c.moneda);
+
+  // Reiniciar estado de captura real SAT para la nueva factura
+  state.satPdfBlob = null;
+  state.satPdfBase64 = null;
+  currentSatSessionId = null;
+  const resBox = document.getElementById('sat-real-result-box');
+  if (resBox) resBox.style.display = 'none';
+  const manBox = document.getElementById('sat-manual-captcha-box');
+  if (manBox) manBox.style.display = 'none';
+  checkGeminiStatus();
   
   updateBookmarklet();
 }
@@ -301,6 +311,9 @@ async function verificarSAT() {
   document.getElementById('btn-print-sat').style.display='none';
   document.getElementById('btn-next1').disabled=true;
 
+  // Verificar estado de la llave de Gemini IA en paralelo
+  checkGeminiStatus();
+
   try {
     const r = await fetch('/api/sat/verificar', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -322,10 +335,7 @@ async function verificarSAT() {
     ].map(x=>`<div class="rrow"><span class="rk">${x.k}</span><span class="rv">${x.v||'—'}</span></div>`).join('');
 
     state.satOk = estado==='vigente';
-    document.getElementById('btn-print-sat').style.display='inline-flex';
     document.getElementById('btn-next1').disabled=false;
-    
-    // Auto-trigger print if requested (optional logic)
   } catch(err) {
     showErr('err-step1', 'No se pudo conectar: '+err.message);
     document.getElementById('sat-badge').style.display='none';
@@ -334,8 +344,241 @@ async function verificarSAT() {
   }
 }
 
-// SAT server-side printing removed to save resources on older Macs.
+// ── ROBOT DE CAPTURA REAL DEL SAT (CONSULTA POR XML + GEMINI IA) ──────────────
+let currentSatSessionId = null;
 
+async function checkGeminiStatus() {
+  try {
+    const r = await fetch('/api/sat/gemini-config');
+    const data = await r.json();
+    const pill = document.getElementById('gemini-status-badge');
+    if (!pill) return;
+    if (data.ok && data.configured) {
+      pill.textContent = `🟢 Gemini IA Activo (${data.maskedKey})`;
+      pill.style.background = '#dcfce7';
+      pill.style.color = '#166534';
+    } else {
+      pill.textContent = '⚡ Modo Asistido (Sin llave Gemini)';
+      pill.style.background = '#fef3c7';
+      pill.style.color = '#92400e';
+    }
+  } catch (e) {}
+}
+
+function toggleGeminiConfigBox() {
+  const box = document.getElementById('gemini-config-box');
+  if (!box) return;
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+}
+
+async function guardarGeminiKey() {
+  const inp = document.getElementById('inp-gemini-key');
+  const msg = document.getElementById('gemini-key-msg');
+  if (!inp || !msg) return;
+  const apiKey = inp.value.trim();
+
+  msg.style.display = 'block';
+  msg.style.color = '#475569';
+  msg.textContent = '⏳ Guardando llave de Gemini IA en el servidor...';
+
+  try {
+    const r = await fetch('/api/sat/gemini-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey })
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'Error al guardar');
+
+    inp.value = '';
+    msg.style.color = '#15803d';
+    msg.innerHTML = data.configured
+      ? `✅ <strong>Llave guardada permanentemente (${data.maskedKey}).</strong> Ahora Gemini resolverá los Captchas del SAT automáticamente.`
+      : 'ℹ️ Llave eliminada.';
+    await checkGeminiStatus();
+    setTimeout(() => {
+      const box = document.getElementById('gemini-config-box');
+      if (box && data.configured) box.style.display = 'none';
+    }, 1800);
+  } catch (err) {
+    msg.style.color = '#dc2626';
+    msg.textContent = '❌ Error: ' + err.message;
+  }
+}
+
+function b64ToBlob(b64Data, contentType = 'application/pdf') {
+  const byteCharacters = atob(b64Data);
+  const byteArrays = [];
+  for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+    const slice = byteCharacters.slice(offset, offset + 512);
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+    byteArrays.push(new Uint8Array(byteNumbers));
+  }
+  return new Blob(byteArrays, { type: contentType });
+}
+
+function mostrarResultadoCapturaSAT(data) {
+  const manualBox = document.getElementById('sat-manual-captcha-box');
+  if (manualBox) manualBox.style.display = 'none';
+
+  const resBox = document.getElementById('sat-real-result-box');
+  const imgEl = document.getElementById('sat-real-screenshot-img');
+  const titleEl = document.getElementById('sat-real-result-title');
+
+  if (data.screenshot && imgEl) {
+    imgEl.src = data.screenshot;
+  }
+  if (data.pdfBase64) {
+    state.satPdfBase64 = data.pdfBase64;
+    state.satPdfBlob = b64ToBlob(data.pdfBase64, 'application/pdf');
+  }
+  if (titleEl) {
+    titleEl.textContent = data.modo === 'gemini'
+      ? `✅ Comprobante Oficial del SAT Generado con Gemini IA (Captcha resuelto: ${data.codigoCaptcha || 'OK'})`
+      : '✅ Comprobante Oficial del SAT Generado (Consulta por XML)';
+  }
+  if (resBox) resBox.style.display = 'block';
+  const btnPrint = document.getElementById('btn-print-sat');
+  if (btnPrint) btnPrint.style.display = 'inline-flex';
+}
+
+async function generarCapturaRealSAT() {
+  if (!state.xmlFile) {
+    return showErr('err-step1', 'Primero selecciona el archivo XML en el Paso 1.');
+  }
+  hideErr('err-step1');
+  const btn = document.getElementById('btn-sat-robot');
+  const originalText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Abriendo portal SAT y resolviendo Captcha...';
+  }
+
+  try {
+    const fd = new FormData();
+    fd.append('xml', state.xmlFile);
+
+    const r = await fetch('/api/sat/captura-xml', {
+      method: 'POST',
+      body: fd
+    });
+    const data = await r.json();
+    if (!data.ok && !data.needsManualCaptcha) {
+      return showErr('err-step1', data.error || 'No se pudo conectar al portal del SAT.');
+    }
+
+    if (data.needsManualCaptcha) {
+      currentSatSessionId = data.sessionId;
+      const manualBox = document.getElementById('sat-manual-captcha-box');
+      const capImg = document.getElementById('sat-captcha-img');
+      const inpCap = document.getElementById('inp-sat-manual-captcha');
+      const titleCap = document.getElementById('sat-manual-captcha-title');
+      if (capImg && data.captchaImage) capImg.src = data.captchaImage;
+      if (titleCap) {
+        titleCap.textContent = data.geminiConfigured
+          ? '⚠️ El Captcha del SAT estuvo difícil. Escribe los 5 números que ves en la imagen:'
+          : '🔢 Escribe los 5 números del Captcha del SAT (o configura tu llave gratuita de Gemini IA arriba para que lo haga solo):';
+      }
+      if (manualBox) manualBox.style.display = 'block';
+      if (inpCap) {
+        inpCap.value = '';
+        inpCap.focus();
+      }
+      return;
+    }
+
+    mostrarResultadoCapturaSAT(data);
+  } catch (err) {
+    showErr('err-step1', 'Error al capturar desde el SAT: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '📸 Obtener Captura Real del SAT';
+    }
+  }
+}
+
+async function enviarCaptchaManualSAT() {
+  const inp = document.getElementById('inp-sat-manual-captcha');
+  const btn = document.getElementById('btn-sat-send-captcha');
+  const code = inp ? inp.value.trim() : '';
+  if (!code || code.length < 4) {
+    return showErr('err-step1', 'Escribe los 5 dígitos que aparecen en la imagen del Captcha.');
+  }
+  hideErr('err-step1');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Verificando en el SAT...';
+  }
+
+  try {
+    const fd = new FormData();
+    fd.append('sessionId', currentSatSessionId || '');
+    fd.append('manualCaptcha', code);
+    if (state.xmlFile) fd.append('xml', state.xmlFile);
+
+    const r = await fetch('/api/sat/captura-xml', {
+      method: 'POST',
+      body: fd
+    });
+    const data = await r.json();
+
+    if (data.needsManualCaptcha) {
+      currentSatSessionId = data.sessionId || currentSatSessionId;
+      const capImg = document.getElementById('sat-captcha-img');
+      if (capImg && data.captchaImage) capImg.src = data.captchaImage;
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+      }
+      return showErr('err-step1', data.error || 'Código incorrecto, intenta con el nuevo Captcha.');
+    }
+
+    if (!data.ok) {
+      return showErr('err-step1', data.error || 'Error al verificar en el SAT.');
+    }
+
+    mostrarResultadoCapturaSAT(data);
+  } catch (err) {
+    showErr('err-step1', 'Error al enviar Captcha: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '✅ Verificar y Capturar';
+    }
+  }
+}
+
+function descargarPdfOficialSAT() {
+  if (!state.satPdfBlob) {
+    return showErr('err-step1', 'Primero genera la Captura Real del SAT.');
+  }
+  const folio = (state.cfdi?.noFactura || state.cfdi?.uuid?.slice(0, 8) || 'CFDI').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const url = URL.createObjectURL(state.satPdfBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Validacion_SAT_${folio}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function imprimirPdfOficialSAT() {
+  if (!state.satPdfBlob) {
+    return generarCapturaRealSAT();
+  }
+  const url = URL.createObjectURL(state.satPdfBlob);
+  const win = window.open(url, '_blank');
+  if (win) {
+    win.addEventListener('load', () => {
+      try { win.print(); } catch (e) {}
+    });
+  }
+}
 
 function closeCaptcha() {
     const overlay = document.getElementById('captcha-overlay');
@@ -368,6 +611,10 @@ async function subirDrive() {
   const fd = new FormData();
   fd.append('xml', state.xmlFile);
   fd.append('pdf', state.pdfFile);
+  if (state.satPdfBlob) {
+    const folio = (state.cfdi?.noFactura || state.cfdi?.uuid?.slice(0, 8) || 'CFDI').replace(/[^a-zA-Z0-9_-]/g, '_');
+    fd.append('satPdf', state.satPdfBlob, `Validacion_SAT_${folio}.pdf`);
+  }
   fd.append('proveedorNombre', proveedor);
   if (state.sucursalFolderId) fd.append('parentFolderId', state.sucursalFolderId);
 

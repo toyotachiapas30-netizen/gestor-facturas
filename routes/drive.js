@@ -194,9 +194,9 @@ router.get('/status', (req, res) => {
   res.json({ ok: true, authorized: isAuth });
 });
 
-// ── POST /api/drive/upload  →  Upload XML + PDF to Drive ───
-// Body: multipart form with fields xml, pdf, proveedorNombre
-router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async (req, res) => {
+// ── POST /api/drive/upload  →  Upload XML + PDF (+ optional SAT PDF) to Drive ───
+// Body: multipart form with fields xml, pdf, satPdf, proveedorNombre
+router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 'satPdf' }]), async (req, res) => {
   const client = getAuthorizedClient();
   if (!client) return res.status(401).json({ ok: false, error: 'No autorizado con Google. Ve a Configuración.' });
 
@@ -247,6 +247,17 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async 
         fields: 'id, name, webViewLink'
       });
       uploaded.push({ tipo: 'PDF', nombre: pdfRes.data.name, link: pdfRes.data.webViewLink });
+    }
+
+    // 4. Upload Comprobante Oficial del SAT (si se generó en el Paso 2)
+    if (req.files['satPdf']) {
+      const satFile = req.files['satPdf'][0];
+      const satRes = await drive.files.create({
+        requestBody: { name: satFile.originalname, parents: [folderId] },
+        media: { mimeType: 'application/pdf', body: require('stream').Readable.from(satFile.buffer) },
+        fields: 'id, name, webViewLink'
+      });
+      uploaded.push({ tipo: 'SAT_PDF', nombre: satRes.data.name, link: satRes.data.webViewLink });
     }
 
     const folderLink = `https://drive.google.com/drive/folders/${folderId}`;
