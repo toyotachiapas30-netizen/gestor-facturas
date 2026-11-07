@@ -6,6 +6,8 @@ const router = express.Router();
 const URL_PORTAL = 'https://autotec.farrera.net/EnvioFacturasGastos/Account/Login?ReturnUrl=%2FEnvioFacturasGastos%2Fhome%2Findex';
 const DEFAULT_EMPRESA_ID = '29'; // VALOR FARRERA AUTOMOTRIZ S. DE R.L. DE C.V.
 
+const portalJobs = new Map();
+
 function getPortalCredentials() {
   const db = getDB();
   const getVal = (k) => {
@@ -74,30 +76,22 @@ router.post('/config', (req, res) => {
   }
 });
 
-// ── POST /api/portal/enviar ─────────────────────────────
-// Body: { uuid, rfcEmisor, noFactura, total, soloPrevisualizar }
-router.post('/enviar', async (req, res) => {
-  const { uuid, rfcEmisor, noFactura, total, soloPrevisualizar } = req.body || {};
-  const creds = getPortalCredentials();
-
-  if (!creds.user || !creds.pass) {
-    return res.status(400).json({
-      ok: false,
-      needsCredentials: true,
-      error: 'Configura primero tu usuario y contraseña de Autotec (Nube 2) en el botón "🔑 Configurar Acceso Autotec".'
-    });
-  }
+async function runPortalJob(jobId, params, creds) {
+  const { uuid, rfcEmisor, noFactura, soloPrevisualizar } = params;
+  const setStep = (step) => {
+    const j = portalJobs.get(jobId);
+    if (j) j.step = step;
+  };
 
   let browser = null;
   try {
+    setStep('⏳ 1/3 Iniciando sesión en EnvioFacturasGastos (Valor Farrera)...');
     browser = await launchBrowser(['--ignore-certificate-errors', '--disable-web-security']);
     const page = await browser.newPage();
     await page.setViewport({ width: 1366, height: 960 });
 
-    // ── 1. Iniciar sesión en EnvioFacturasGastos ──────────
-    console.log('🌐 [Portal Nube 2] Abriendo EnvioFacturasGastos...');
-    await page.goto(URL_PORTAL, { waitUntil: 'domcontentloaded', timeout: 40000 });
-    await page.waitForSelector('#inputEmail, input[name="Username"]', { timeout: 15000 });
+    await page.goto(URL_PORTAL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForSelector('#inputEmail, input[name="Username"]', { timeout: 20000 });
 
     await page.evaluate((c) => {
       const u = document.getElementById('inputEmail') || document.querySelector('input[name="Username"]');
@@ -120,23 +114,21 @@ router.post('/enviar', async (req, res) => {
     }, creds);
 
     await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 35000 }).catch(() => {}),
       page.click('input[type="submit"], button[type="submit"], .btn-signin').catch(() => {})
     ]);
     await new Promise((r) => setTimeout(r, 2500));
 
-    // Verificar si el login falló (sigue en /Account/Login)
     const currentUrl = page.url();
     if (/\/Account\/Login/i.test(currentUrl)) {
       const errText = await page.evaluate(() => {
         const errEl = document.querySelector('.validation-summary-errors, .field-validation-error, .alert-danger');
         return errEl ? errEl.innerText.trim() : 'Usuario, contraseña o empresa incorrectos en EnvioFacturasGastos.';
       });
-      await browser.close().catch(() => {});
-      return res.status(401).json({ ok: false, error: errText });
+      throw new Error(errText);
     }
 
-    // ── 2. Buscar en el filtro de búsqueda (si existe) ────
+    setStep('⏳ 2/3 Buscando y marcando únicamente la factura en la tabla...');
     const folioClean = (noFactura && noFactura !== '—') ? String(noFactura).trim() : '';
     const uuidShort = (uuid && uuid !== '—') ? String(uuid).split('-')[0].trim() : '';
     const searchTerm = folioClean || uuidShort || rfcEmisor || '';
@@ -149,12 +141,8 @@ router.post('/enviar', async (req, res) => {
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    // ── 3. Seleccionar ÚNICAMENTE la casilla de esta factura ─
-    // (Regla de Memoria: el buscador a veces muestra pendientes de otros proveedores;
-    // desmarcar todo y marcar exclusivamente la fila que coincide con nuestra factura).
     const matchInfo = await page.evaluate((criteria) => {
       const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
-      // Desmarcar cualquier casilla previa
       checkboxes.forEach((cb) => {
         if (cb.checked) cb.click();
       });
@@ -179,7 +167,7 @@ router.post('/enviar', async (req, res) => {
           cb.dispatchEvent(new Event('change', { bubbles: true }));
           matchedRowText = (tr.innerText || '').replace(/\s+/g, ' ').trim();
           checkedCount++;
-          break; // ¡Solo marcar 1 factura!
+          break;
         }
       }
 
@@ -195,9 +183,8 @@ router.post('/enviar', async (req, res) => {
     let enviado = false;
     let modalVerificado = false;
 
-    // ── 4. Si se encontró la factura y no es soloPrevisualizar, enviar ─
     if (matchInfo.checkedCount === 1 && !soloPrevisualizar) {
-      // Buscar botón "Enviar" principal
+      setStep('⏳ 3/3 Confirmando envío en modal "Facturas Seleccionadas" y capturando...');
       const clickedEnviar = await page.evaluate(() => {
         const els = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn'));
         const btn = els.find((el) => /enviar/i.test((el.innerText || el.value || '').trim()));
@@ -210,14 +197,11 @@ router.post('/enviar', async (req, res) => {
 
       if (clickedEnviar) {
         await new Promise((r) => setTimeout(r, 2000));
-
-        // Si se abre el modal "Facturas Seleccionadas", verificar que solo haya 1 factura y confirmar
         const modalAction = await page.evaluate(() => {
           const modals = Array.from(document.querySelectorAll('.modal.in, .modal.show, [role="dialog"], .sweet-alert, .bootbox'));
           const visibleModal = modals.find((m) => m.offsetParent !== null);
           if (!visibleModal) return { hadModal: false, confirmed: true };
 
-          // Buscar botón de confirmación dentro del modal
           const modalBtns = Array.from(visibleModal.querySelectorAll('button, input[type="submit"], a.btn'));
           const confirmBtn = modalBtns.find((b) => /enviar|aceptar|confirmar|si|sí|guardar/i.test((b.innerText || b.value || '').trim()));
           if (confirmBtn) {
@@ -243,7 +227,7 @@ router.post('/enviar', async (req, res) => {
 
     await browser.close().catch(() => {});
 
-    return res.json({
+    const result = {
       ok: true,
       encontrada: matchInfo.checkedCount === 1,
       checkedCount: matchInfo.checkedCount,
@@ -259,12 +243,56 @@ router.post('/enviar', async (req, res) => {
           : `⚠️ Se entró a EnvioFacturasGastos pero no apareció el folio ${folioClean || uuidShort} en la tabla (${matchInfo.totalRowsWithCheckbox} pendientes visibles). Revisa la captura.`,
       screenshot: `data:image/png;base64,${screenshotB64}`,
       pdfBase64: Buffer.from(pdfBuf).toString('base64')
-    });
+    };
+
+    portalJobs.set(jobId, { status: 'done', step: '✅ Completado', result });
+    setTimeout(() => portalJobs.delete(jobId), 300000);
+    return result;
   } catch (err) {
     if (browser) await browser.close().catch(() => {});
     console.error('🔥 [Portal Nube 2] Error:', err.message);
+    portalJobs.set(jobId, { status: 'error', error: err.message });
+    setTimeout(() => portalJobs.delete(jobId), 300000);
+    throw err;
+  }
+}
+
+// ── POST /api/portal/enviar ─────────────────────────────
+router.post('/enviar', async (req, res) => {
+  const { uuid, rfcEmisor, noFactura, total, soloPrevisualizar, asyncJob } = req.body || {};
+  const creds = getPortalCredentials();
+
+  if (!creds.user || !creds.pass) {
+    return res.status(400).json({
+      ok: false,
+      needsCredentials: true,
+      error: 'Configura primero tu usuario y contraseña de Autotec (Nube 2) en el botón "🔑 Configurar Acceso Autotec".'
+    });
+  }
+
+  const jobId = `portal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  portalJobs.set(jobId, { status: 'running', step: '⏳ Iniciando sesión en EnvioFacturasGastos...' });
+
+  if (asyncJob) {
+    runPortalJob(jobId, { uuid, rfcEmisor, noFactura, total, soloPrevisualizar }, creds).catch(() => {});
+    return res.json({ ok: true, asyncJob: true, jobId });
+  }
+
+  try {
+    const result = await runPortalJob(jobId, { uuid, rfcEmisor, noFactura, total, soloPrevisualizar }, creds);
+    return res.json(result);
+  } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ── GET /api/portal/status/:jobId ───────────────────────
+router.get('/status/:jobId', (req, res) => {
+  const job = portalJobs.get(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ ok: false, error: 'La tarea expiró o el servidor se reinició. Intenta de nuevo.' });
+  }
+  return res.json({ ok: true, ...job });
 });
 
 module.exports = router;

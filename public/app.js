@@ -741,6 +741,8 @@ async function subirDrive() {
 async function subirBuzon(soloValidar = false) {
   hideErr('err-step3');
   if (!state.xmlFile) return showErr('err-step3', 'Carga primero el archivo XML en el Paso 1.');
+  const btn = document.getElementById('btn-buzon');
+  const origHtml = btn ? btn.innerHTML : '';
   setLoading('btn-buzon','spin-buzon',true);
 
   const fd = new FormData();
@@ -757,11 +759,42 @@ async function subirBuzon(soloValidar = false) {
   fd.append('correo', correo);
   if (ordenCompra) fd.append('ordenCompra', ordenCompra);
   if (soloValidar) fd.append('soloValidar', 'true');
+  fd.append('asyncJob', 'true');
 
   try {
     const r = await fetch('/api/autotec/buzon', { method:'POST', body:fd });
-    const data = await r.json();
-    if (!data.ok) return showErr('err-step3', data.error);
+    const rawText = await r.text();
+    let startData;
+    try {
+      startData = JSON.parse(rawText);
+    } catch (parseErr) {
+      throw new Error('El servidor se está actualizando (espera 20 segundos y vuelve a dar clic).');
+    }
+    if (!startData.ok) return showErr('err-step3', startData.error);
+
+    let data = startData;
+    if (startData.asyncJob && startData.jobId) {
+      for (let i = 0; i < 65; i++) {
+        await new Promise(res => setTimeout(res, 2500));
+        const stRes = await fetch(`/api/autotec/buzon-status/${startData.jobId}`);
+        const stText = await stRes.text();
+        let stData;
+        try { stData = JSON.parse(stText); } catch (e) { continue; }
+        if (!stData.ok) throw new Error(stData.error || 'Error consultando estado del Buzón.');
+        if (btn && stData.step) {
+          btn.innerHTML = `<span class="spinner" style="display:inline-block"></span> ${stData.step}`;
+        }
+        if (stData.status === 'done') {
+          data = stData.result;
+          break;
+        }
+        if (stData.status === 'error') {
+          throw new Error(stData.error || 'Error en Buzón Autotec.');
+        }
+      }
+    }
+
+    if (!data || !data.ok) return showErr('err-step3', data?.error || 'Tiempo de espera agotado en Buzón Autotec.');
 
     document.getElementById('buzon-result').style.display='block';
     if (data.screenshot) document.getElementById('buzon-screenshot').src=data.screenshot;
@@ -782,6 +815,7 @@ async function subirBuzon(soloValidar = false) {
   } catch(err) {
     showErr('err-step3','Error en Buzón Autotec: '+err.message);
   } finally {
+    if (btn && origHtml) btn.innerHTML = origHtml;
     setLoading('btn-buzon','spin-buzon',false);
   }
 }
@@ -905,6 +939,8 @@ async function ejecutarPortalNube2(soloPrevisualizar = false) {
   hideErr('err-step4');
   const btnId = soloPrevisualizar ? 'btn-portal-preview' : 'btn-portal-send';
   const spinId = soloPrevisualizar ? 'spin-portal-prev' : 'spin-portal-send';
+  const btn = document.getElementById(btnId);
+  const origHtml = btn ? btn.innerHTML : '';
   setLoading(btnId, spinId, true);
 
   try {
@@ -916,17 +952,49 @@ async function ejecutarPortalNube2(soloPrevisualizar = false) {
         rfcEmisor: state.cfdi?.rfcEmisor || '',
         noFactura: state.cfdi?.noFactura || '',
         total: state.cfdi?.total || '',
-        soloPrevisualizar
+        soloPrevisualizar,
+        asyncJob: true
       })
     });
-    const data = await r.json();
-    if (!data.ok) {
-      if (data.needsCredentials) {
+    const rawText = await r.text();
+    let startData;
+    try {
+      startData = JSON.parse(rawText);
+    } catch (parseErr) {
+      throw new Error('El servidor se está actualizando (espera 20 segundos y vuelve a dar clic).');
+    }
+
+    if (!startData.ok) {
+      if (startData.needsCredentials) {
         const box = document.getElementById('portal-config-box');
         if (box) box.style.display = 'block';
       }
-      return showErr('err-step4', data.error || 'Error en EnvioFacturasGastos.');
+      return showErr('err-step4', startData.error || 'Error en EnvioFacturasGastos.');
     }
+
+    let data = startData;
+    if (startData.asyncJob && startData.jobId) {
+      for (let i = 0; i < 50; i++) {
+        await new Promise(res => setTimeout(res, 2500));
+        const stRes = await fetch(`/api/portal/status/${startData.jobId}`);
+        const stText = await stRes.text();
+        let stData;
+        try { stData = JSON.parse(stText); } catch (e) { continue; }
+        if (!stData.ok) throw new Error(stData.error || 'Error consultando estado de Nube 2.');
+        if (btn && stData.step) {
+          btn.innerHTML = `<span class="spinner" style="display:inline-block"></span> ${stData.step}`;
+        }
+        if (stData.status === 'done') {
+          data = stData.result;
+          break;
+        }
+        if (stData.status === 'error') {
+          throw new Error(stData.error || 'Error en EnvioFacturasGastos.');
+        }
+      }
+    }
+
+    if (!data || !data.ok) return showErr('err-step4', data?.error || 'Tiempo agotado en EnvioFacturasGastos.');
 
     const resBox = document.getElementById('portal-result');
     const imgEl = document.getElementById('portal-screenshot');
@@ -956,6 +1024,7 @@ async function ejecutarPortalNube2(soloPrevisualizar = false) {
   } catch (err) {
     showErr('err-step4', 'Error conectando con EnvioFacturasGastos: ' + err.message);
   } finally {
+    if (btn && origHtml) btn.innerHTML = origHtml;
     setLoading(btnId, spinId, false);
   }
 }
