@@ -2720,116 +2720,183 @@ function renderComprobantes() {
 
   const gastosDisp = window.comprobantesGastosDisponibles || [];
 
-  listEl.innerHTML = filtered.map((it, idx) => {
-    const isProc = it.estatus === 'procesado';
-    const isDesc = it.estatus === 'descartado';
+  // Agrupar comprobantes por correo (messageId), exactamente igual que en Bandeja de Entrada
+  const correosMap = new Map();
+  filtered.forEach((it, idx) => {
+    if (!correosMap.has(it.messageId)) {
+      correosMap.set(it.messageId, {
+        messageId: it.messageId,
+        fromName: it.fromName,
+        fromEmail: it.fromEmail,
+        subject: it.subject,
+        fechaMs: it.fechaMs,
+        items: []
+      });
+    }
+    correosMap.get(it.messageId).items.push({ it, idx });
+  });
 
-    let badgeHtml = '<span class="bandeja-status-pill pendiente">⏳ Pendiente por Vincular</span>';
-    if (isProc) badgeHtml = '<span class="bandeja-status-pill procesado">✅ Vinculado (PAGADO)</span>';
-    else if (isDesc) badgeHtml = '<span class="bandeja-status-pill descartado">🚫 Descartado</span>';
+  const cardsHtml = [];
 
-    const previewUrl = `/api/mail/attachment/${encodeURIComponent(it.messageId)}/${encodeURIComponent(it.attachmentId)}?filename=${encodeURIComponent(it.filename)}&mimeType=application%2Fpdf`;
-    const downloadUrl = `${previewUrl}&download=1`;
+  for (const correo of correosMap.values()) {
+    const hasPending = correo.items.some(x => x.it.estatus === 'pendiente');
+    const allProcessed = correo.items.every(x => x.it.estatus === 'procesado');
+    const cardStateClass = hasPending ? 'has-pending' : (allProcessed ? 'all-processed' : '');
 
-    const sug = it.gastoSugerido;
-    const selectId = `comp-gasto-sel-${idx}`;
-    const btnVincularId = `btn-comp-vincular-${idx}`;
+    const boxesHtml = correo.items.map(({ it, idx }) => {
+      const isProc = it.estatus === 'procesado';
+      const isDesc = it.estatus === 'descartado';
 
-    // Construir opciones del selector de Gasto en Control de Gastos
-    const optionsHtml = [
-      `<option value="">— Selecciona el gasto en Control de Gastos para vincular —</option>`
-    ];
+      let statusPill = '<span class="bandeja-status-pill pendiente">⏳ PENDIENTE</span>';
+      if (isProc) statusPill = '<span class="bandeja-status-pill procesado">✅ VINCULADO · En Control de Gastos</span>';
+      else if (isDesc) statusPill = '<span class="bandeja-status-pill descartado">🚫 DESCARTADO</span>';
 
-    // Si hay sugerido, ponerlo primero o marcarlo seleccionado
-    gastosDisp.forEach(g => {
-      const selected = (sug && sug.id === g.id) ? 'selected' : '';
-      const estTag = g.estatus === 'pagado' ? '✅ PAGADO' : '⏳ EN PROCESO';
-      const montoStr = fmtMonto(String(g.monto || 0), 'MXN');
-      const fechaStr = g.fecha_factura || 'S/F';
-      optionsHtml.push(
-        `<option value="${esc(g.id)}" ${selected}>[${estTag}] ${esc(g.proveedor)} • Folio: ${esc(g.folio || 'S/F')} • ${montoStr} (${esc(fechaStr)})</option>`
-      );
-    });
+      const previewUrl = `/api/mail/attachment/${encodeURIComponent(it.messageId)}/${encodeURIComponent(it.attachmentId)}?filename=${encodeURIComponent(it.filename)}&mimeType=application%2Fpdf`;
+      const downloadUrl = `${previewUrl}&download=1`;
 
-    const matchBannerHtml = sug
-      ? `<div style="background:${isProc ? '#ecfdf5' : '#eff6ff'}; border:1px solid ${isProc ? '#a7f3d0' : '#bfdbfe'}; border-radius:8px; padding:10px 12px; margin-top:10px; font-size:12.5px; color:#1e293b; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-          <div>
-            <strong style="color:${isProc ? '#047857' : '#1d4ed8'};">${isProc ? '✅ Emparejado con Gasto Pagado:' : '🎯 Factura detectada automáticamente:'}</strong>
-            <span style="margin-left:6px; font-weight:700;">${esc(sug.proveedor)}</span>
-            <span style="color:#475569;"> • Folio: <strong>${esc(sug.folio || '—')}</strong> • Monto: <strong>${fmtMonto(String(sug.monto || 0), 'MXN')}</strong> (${esc(sug.fecha_factura || '—')})</span>
+      const sug = it.gastoSugerido;
+      const selectId = `comp-gasto-sel-${idx}`;
+      const btnVincularId = `btn-comp-vincular-${idx}`;
+      const editRowId = `comp-edit-row-${idx}`;
+
+      const optionsHtml = [
+        `<option value="">— Selecciona factura de Control de Gastos —</option>`
+      ];
+      gastosDisp.forEach(g => {
+        const selected = (sug && sug.id === g.id) ? 'selected' : '';
+        const estTag = g.estatus === 'pagado' ? '✅ PAGADO' : '⏳ EN PROCESO';
+        const montoStr = fmtMonto(String(g.monto || 0), 'MXN');
+        const fechaStr = g.fecha_factura || 'S/F';
+        optionsHtml.push(
+          `<option value="${esc(g.id)}" ${selected}>[${estTag}] ${esc(g.proveedor)} • Folio: ${esc(g.folio || 'S/F')} • ${montoStr} (${esc(fechaStr)})</option>`
+        );
+      });
+
+      const conceptoMatchHtml = sug
+        ? `<div class="bandeja-invoice-concepto">
+            <strong>${isProc ? '✅ Factura Pagada en Control de Gastos:' : '🎯 Factura Detectada Automáticamente:'}</strong>
+            ${esc(sug.proveedor)} • <strong>Folio:</strong> ${esc(sug.folio || '—')} • <strong>Monto:</strong> ${fmtMonto(String(sug.monto || 0), 'MXN')}
+            ${sug.fecha_factura ? `<span style="color:#64748b; margin-left:6px;">(📅 Factura: ${fmtFecha(sug.fecha_factura)})</span>` : ''}
+          </div>`
+        : `<div class="bandeja-invoice-concepto" style="color:#64748b;">
+            Selecciona en la lista desplegable la factura correspondiente en Control de Gastos para vincular este pago.
+          </div>`;
+
+      const driveChipHtml = (sug && sug.comprobante_pago_url)
+        ? `<a href="${esc(sug.comprobante_pago_url)}" target="_blank" class="bandeja-file-chip extra" title="Abrir comprobante guardado en Google Drive">📂 Ver en Drive ↗</a>`
+        : '';
+
+      let actionsHtml = '';
+      if (it.estatus === 'pendiente') {
+        actionsHtml = `
+          <select id="${selectId}" style="padding:5px 8px; font-size:12px; border-radius:6px; border:1px solid #cbd5e1; background:#fff; color:#1e293b; font-weight:600; max-width:340px;">
+            ${optionsHtml.join('')}
+          </select>
+          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#dc2626; border-color:#fca5a5; background:#fef2f2;" onclick="borrarComprobanteBandeja('${esc(it.idClave)}', '${esc(it.messageId)}')" title="Borrar de la Bandeja">
+            🗑️ Borrar
+          </button>
+          <button class="btn btn-primary" id="${btnVincularId}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="vincularComprobanteAGasto(${idx}, '${selectId}', '${btnVincularId}')">
+            ⚡ Subir a Drive y Marcar PAGADO →
+          </button>
+        `;
+      } else {
+        actionsHtml = `
+          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px;" onclick="toggleSelectorComprobante('${editRowId}')">
+            🔄 Cambiar Gasto
+          </button>
+          <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#dc2626; border-color:#fca5a5; background:#fef2f2;" onclick="borrarComprobanteBandeja('${esc(it.idClave)}', '${esc(it.messageId)}')" title="Borrar de la Bandeja">
+            🗑️ Borrar
+          </button>
+        `;
+      }
+
+      const hiddenRebindBox = (it.estatus !== 'pendiente')
+        ? `<div id="${editRowId}" style="display:none; margin-top:10px; padding-top:10px; border-top:1px dashed #cbd5e1; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+            <select id="${selectId}" style="padding:5px 8px; font-size:12px; border-radius:6px; border:1px solid #cbd5e1; background:#fff; color:#1e293b; font-weight:600; flex:1; min-width:240px;">
+              ${optionsHtml.join('')}
+            </select>
+            <button class="btn btn-primary" id="${btnVincularId}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="vincularComprobanteAGasto(${idx}, '${selectId}', '${btnVincularId}')">
+              ⚡ Guardar y Actualizar en Drive →
+            </button>
+          </div>`
+        : '';
+
+      return `
+        <div class="bandeja-invoice-box ${it.estatus}">
+          <div class="bandeja-invoice-top">
+            <div class="bandeja-invoice-meta">
+              <span style="font-weight:700; color:#0f172a; font-size:14px;">🏢 ${esc(it.proveedorDetectado || it.filename)}</span>
+              ${it.operacion ? `<span style="background:#e2e8f0; padding:2px 8px; border-radius:4px; font-weight:700; font-size:12px;">Op: ${esc(it.operacion)}</span>` : ''}
+              ${it.folioDetectado ? `<span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:4px; font-weight:700; font-size:12px;">Folio: ${esc(it.folioDetectado)}</span>` : ''}
+              <span style="font-weight:800; color:#2563eb; font-size:14px;">${it.montoDetectado ? fmtMonto(String(it.montoDetectado), 'MXN') : '—'}</span>
+            </div>
+            <div>${statusPill}</div>
           </div>
-          ${sug.comprobante_pago_url ? `<a href="${esc(sug.comprobante_pago_url)}" target="_blank" class="btn btn-outline" style="padding:4px 10px; font-size:11.5px; text-decoration:none; color:#047857; border-color:#6ee7b7; background:#fff;">📂 Ver en Drive ↗</a>` : ''}
-        </div>`
-      : '';
 
-    return `
-      <div class="bandeja-card ${isProc ? 'is-procesado' : ''} ${isDesc ? 'is-descartado' : ''}" style="margin-bottom:16px;">
-        <div class="bandeja-card-header">
-          <div>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <span style="font-size:15px; font-weight:800; color:#0f172a;">💸 ${esc(it.proveedorDetectado || it.filename)}</span>
-              ${it.operacion ? `<span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:#f1f5f9; color:#334155; font-family:monospace;">Op: ${esc(it.operacion)}</span>` : ''}
-              ${it.folioDetectado ? `<span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:#fef3c7; color:#92400e;">Folio: ${esc(it.folioDetectado)}</span>` : ''}
-              ${badgeHtml}
+          ${conceptoMatchHtml}
+
+          <div class="bandeja-invoice-bottom">
+            <div class="bandeja-files-row">
+              <a href="${previewUrl}" target="_blank" class="bandeja-file-chip pdf" title="Abrir PDF del comprobante en nueva pestaña">📕 ${esc(it.filename)} <span style="opacity:.75;">(👁️ Ver)</span></a>
+              <a href="${downloadUrl}" download="${esc(it.filename)}" class="bandeja-file-chip xml" title="Descargar PDF del comprobante a tu computadora">⬇️ Descargar PDF</a>
+              ${driveChipHtml}
             </div>
-            <div style="font-size:12px; color:#64748b; margin-top:4px;">
-              📩 <strong>${esc(it.fromName)}</strong> (${esc(it.fromEmail)}) • Asunto: <em>${esc(it.subject)}</em>
+            <div class="bandeja-actions-row">
+              ${actionsHtml}
             </div>
           </div>
-          <div style="text-align:right;">
-            <div style="font-size:18px; font-weight:800; color:#047857;">
-              ${it.montoDetectado ? fmtMonto(String(it.montoDetectado), 'MXN') : '—'}
+          ${hiddenRebindBox}
+        </div>
+      `;
+    }).join('');
+
+    cardsHtml.push(`
+      <div class="bandeja-email-card ${cardStateClass}">
+        <div class="bandeja-email-header">
+          <div>
+            <div class="bandeja-sender-title">
+              <span>✉️ ${esc(correo.fromName)}</span>
+              <span class="bandeja-sender-email">&lt;${esc(correo.fromEmail)}&gt;</span>
             </div>
-            <div style="font-size:11.5px; color:#64748b;">📅 ${fmtEmailDate(it.fechaMs)}</div>
+            <div class="bandeja-subject">Asunto: <strong>${esc(correo.subject)}</strong></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="descargarTodosComprobantesCorreo('${esc(correo.messageId)}')" style="padding:5px 12px; font-size:12px; font-weight:700; color:#1d4ed8; border-color:#93c5fd; background:#eff6ff; display:inline-flex; align-items:center; gap:6px;" title="Descargar todos los comprobantes PDF de este correo">
+              ⬇️ Descargar Todo (${correo.items.length})
+            </button>
+            <div class="bandeja-date-badge">📅 ${fmtEmailDate(correo.fechaMs)}</div>
           </div>
         </div>
 
-        <div class="bandeja-card-body" style="padding-top:12px;">
-          <!-- Archivo PDF del Comprobante con botones de Vista Previa y Descarga -->
-          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px;">
-            <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:#1e293b;">
-              <span>📑</span>
-              <span>${esc(it.filename)}</span>
-            </div>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <a href="${previewUrl}" target="_blank" class="btn btn-outline" style="padding:6px 12px; font-size:12px; text-decoration:none;">
-                👁️ Ver PDF
-              </a>
-              <a href="${downloadUrl}" download="${esc(it.filename)}" class="btn btn-outline" style="padding:6px 12px; font-size:12px; text-decoration:none; color:#0284c7; border-color:#7dd3fc; background:#f0f9ff; font-weight:700;">
-                ⬇️ Descargar Comprobante
-              </a>
-            </div>
-          </div>
-
-          ${matchBannerHtml}
-
-          <!-- Selector de Gasto y Botón de 1 clic para Vincular a Drive + Control de Gastos -->
-          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-top:12px; padding-top:12px; border-top:1px dashed #e2e8f0;">
-            <div style="flex:1; min-width:260px;">
-              <label style="font-size:11px; color:#475569; font-weight:600; display:block; margin-bottom:4px;">
-                Vincular con registro en Control de Gastos (Toyota Chiapas):
-              </label>
-              <select id="${selectId}" style="width:100%; padding:8px 10px; font-size:12.5px; border-radius:8px; border:1px solid #cbd5e1;">
-                ${optionsHtml.join('')}
-              </select>
-            </div>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; align-self:flex-end;">
-              <button class="btn btn-primary" id="${btnVincularId}" onclick="vincularComprobanteAGasto(${idx}, '${selectId}', '${btnVincularId}')" style="padding:9px 16px; font-size:12.5px; font-weight:700; background:#059669; border-color:#059669;">
-                ${isProc ? '🔄 Volver a Subir / Actualizar en Gastos' : '✅ Subir a Drive y Marcar PAGADO'}
-              </button>
-              ${!isDesc
-                ? `<button class="btn btn-outline" onclick="setComprobanteEstado('${esc(it.idClave)}', '${esc(it.messageId)}', 'descartado')" style="padding:8px 12px; font-size:12px; color:#64748b;">🚫 Descartar</button>`
-                : `<button class="btn btn-outline" onclick="setComprobanteEstado('${esc(it.idClave)}', '${esc(it.messageId)}', 'pendiente')" style="padding:8px 12px; font-size:12px;">↩️ Restaurar</button>`
-              }
-              <button class="btn btn-outline" onclick="borrarComprobanteBandeja('${esc(it.idClave)}', '${esc(it.messageId)}')" style="padding:8px 12px; font-size:12px; color:#dc2626; border-color:#fca5a5;" title="Quitar de la bandeja">
-                🗑️
-              </button>
-            </div>
-          </div>
+        <div style="font-size:12px; font-weight:700; color:#475569; margin-bottom:8px;">
+          💸 Comprobantes de pago detectados en este correo (${correo.items.length}):
         </div>
+        ${boxesHtml}
       </div>
-    `;
-  }).join('');
+    `);
+  }
+
+  listEl.innerHTML = cardsHtml.join('');
+}
+
+function toggleSelectorComprobante(rowId) {
+  const el = document.getElementById(rowId);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+}
+
+function descargarTodosComprobantesCorreo(messageId) {
+  const items = (window.comprobantesItems || []).filter(x => x.messageId === messageId);
+  items.forEach((it, i) => {
+    setTimeout(() => {
+      const a = document.createElement('a');
+      a.href = `/api/mail/attachment/${encodeURIComponent(it.messageId)}/${encodeURIComponent(it.attachmentId)}?filename=${encodeURIComponent(it.filename)}&mimeType=application%2Fpdf&download=1`;
+      a.download = it.filename || 'comprobante.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }, i * 350);
+  });
 }
 
 async function vincularComprobanteAGasto(idx, selectId, btnId) {
