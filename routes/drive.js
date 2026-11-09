@@ -208,8 +208,9 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 
 
   try {
     // 1. Search or create subfolder with provider name
+    const safeName = proveedorNombre.replace(/'/g, "\\'");
     const searchRes = await drive.files.list({
-      q: `'${rootFolderId}' in parents and name='${proveedorNombre}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      q: `'${rootFolderId}' in parents and name='${safeName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       fields: 'files(id, name)'
     });
 
@@ -225,40 +226,43 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 
       folderId = newFolder.data.id;
     }
 
-    const uploaded = [];
+    const tasks = [];
 
-    // 2. Upload XML
-    if (req.files['xml']) {
+    // 2. Upload XML, PDF, and SAT_PDF in parallel for fast response
+    if (req.files && req.files['xml'] && req.files['xml'][0]) {
       const xmlFile = req.files['xml'][0];
-      const xmlRes = await drive.files.create({
-        requestBody: { name: xmlFile.originalname, parents: [folderId] },
-        media: { mimeType: 'application/xml', body: require('stream').Readable.from(xmlFile.buffer) },
-        fields: 'id, name, webViewLink'
-      });
-      uploaded.push({ tipo: 'XML', nombre: xmlRes.data.name, link: xmlRes.data.webViewLink });
+      tasks.push(
+        drive.files.create({
+          requestBody: { name: xmlFile.originalname, parents: [folderId] },
+          media: { mimeType: 'application/xml', body: require('stream').Readable.from(xmlFile.buffer) },
+          fields: 'id, name, webViewLink'
+        }).then(r => ({ tipo: 'XML', nombre: r.data.name, link: r.data.webViewLink }))
+      );
     }
 
-    // 3. Upload PDF
-    if (req.files['pdf']) {
+    if (req.files && req.files['pdf'] && req.files['pdf'][0]) {
       const pdfFile = req.files['pdf'][0];
-      const pdfRes = await drive.files.create({
-        requestBody: { name: pdfFile.originalname, parents: [folderId] },
-        media: { mimeType: 'application/pdf', body: require('stream').Readable.from(pdfFile.buffer) },
-        fields: 'id, name, webViewLink'
-      });
-      uploaded.push({ tipo: 'PDF', nombre: pdfRes.data.name, link: pdfRes.data.webViewLink });
+      tasks.push(
+        drive.files.create({
+          requestBody: { name: pdfFile.originalname, parents: [folderId] },
+          media: { mimeType: 'application/pdf', body: require('stream').Readable.from(pdfFile.buffer) },
+          fields: 'id, name, webViewLink'
+        }).then(r => ({ tipo: 'PDF', nombre: r.data.name, link: r.data.webViewLink }))
+      );
     }
 
-    // 4. Upload Comprobante Oficial del SAT (si se generó en el Paso 2)
-    if (req.files['satPdf']) {
+    if (req.files && req.files['satPdf'] && req.files['satPdf'][0]) {
       const satFile = req.files['satPdf'][0];
-      const satRes = await drive.files.create({
-        requestBody: { name: satFile.originalname, parents: [folderId] },
-        media: { mimeType: 'application/pdf', body: require('stream').Readable.from(satFile.buffer) },
-        fields: 'id, name, webViewLink'
-      });
-      uploaded.push({ tipo: 'SAT_PDF', nombre: satRes.data.name, link: satRes.data.webViewLink });
+      tasks.push(
+        drive.files.create({
+          requestBody: { name: satFile.originalname, parents: [folderId] },
+          media: { mimeType: 'application/pdf', body: require('stream').Readable.from(satFile.buffer) },
+          fields: 'id, name, webViewLink'
+        }).then(r => ({ tipo: 'SAT_PDF', nombre: r.data.name, link: r.data.webViewLink }))
+      );
     }
+
+    const uploaded = await Promise.all(tasks);
 
     const folderLink = `https://drive.google.com/drive/folders/${folderId}`;
     return res.json({ ok: true, carpeta: proveedorNombre, folderId, folderLink, archivos: uploaded });

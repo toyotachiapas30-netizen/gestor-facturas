@@ -2,6 +2,54 @@
 // Gestor de Facturas — Frontend App  v2
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Wrapper de fetch con reintento automático contra cierres de socket (502/504/empty body) ──
+(function installResilientApiFetch() {
+  const _rawFetch = window.fetch.bind(window);
+  window.fetch = async function resilientFetch(input, init) {
+    const urlStr = typeof input === 'string' ? input : (input?.url || '');
+    const isJsonApi = urlStr.startsWith('/api/') && !urlStr.startsWith('/api/mail/attachment/');
+    if (!isJsonApi) {
+      return _rawFetch(input, init);
+    }
+
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const resp = await _rawFetch(input, init);
+        const clone = resp.clone();
+        const txt = (await clone.text()).trim();
+        const isHtmlOrEmpty = !txt || txt.startsWith('<!DOCTYPE') || txt.startsWith('<html') || resp.status === 502 || resp.status === 503 || resp.status === 504;
+
+        if (!isHtmlOrEmpty) {
+          return resp;
+        }
+
+        if (attempt < maxAttempts) {
+          console.warn(`🔄 [API Retry ${attempt}/${maxAttempts}] Respuesta vacía/HTML en ${urlStr}, renovando conexión...`);
+          await _rawFetch('/api/drive/status', { cache: 'no-store' }).catch(() => {});
+          await new Promise(r => setTimeout(r, 1800));
+          continue;
+        }
+
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: 'La conexión tardó más de lo esperado o se renovó. Por favor vuelve a dar clic en el botón.'
+          }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      } catch (netErr) {
+        if (attempt < maxAttempts) {
+          await _rawFetch('/api/drive/status', { cache: 'no-store' }).catch(() => {});
+          await new Promise(r => setTimeout(r, 1800));
+          continue;
+        }
+        throw netErr;
+      }
+    }
+  };
+})();
+
 // ── State ─────────────────────────────────────────────────────────────────────
 const state = {
   xmlFile: null, pdfFile: null,

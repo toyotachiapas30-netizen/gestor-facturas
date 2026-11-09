@@ -377,10 +377,14 @@ app.get('*', (req, res) => {
 
 async function startServer() {
   // Abrir el puerto de inmediato para evitar timeouts en el balanceador de Render
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n✅ SERVIDOR ACTUALIZADO`);
     console.log(`🚀 Corriendo en puerto: ${PORT}`);
   });
+
+  // Evitar cierres prematuros de socket (502 / "Unexpected end of JSON input") detrás del proxy de Render/Cloudflare/Vercel
+  server.keepAliveTimeout = 120000;
+  server.headersTimeout = 125000;
 
   // 1. Restaurar base de datos SQLite desde Google Drive
   try {
@@ -422,3 +426,9 @@ async function handleShutdown(signal) {
 
 process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 process.on('SIGINT', () => handleShutdown('SIGINT'));
+process.on('unhandledRejection', (reason) => {
+  console.warn('⚠️ [UnhandledRejection ignorado para mantener servidor activo]:', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ [UncaughtException capturado]:', err?.message || err);
+});
