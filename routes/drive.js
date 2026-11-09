@@ -7,12 +7,21 @@ const multer = require('multer');
 const router = express.Router();
 
 // ── Config ────────────────────────────────────
-const TOKENS_FILE = path.join(__dirname, '..', '.google-tokens.json');
+const os = require('os');
+const TOKENS_FILE = process.env.VERCEL
+  ? path.join(os.tmpdir(), '.google-tokens.json')
+  : path.join(__dirname, '..', '.google-tokens.json');
+const BUNDLED_TOKENS_FILE = path.join(__dirname, '..', '.google-tokens.json');
+
+const DEFAULT_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const DEFAULT_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const DEFAULT_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
+const DEFAULT_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '1i0gZJ2kSI6_7pt9fIWrDkk-s3EIWOxVc';
 
 // Dynamic Redirect URI (Cloud vs Local)
 function getRedirectUri(req) {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
-  const host = req ? req.get('host') : 'localhost:3001';
+  const host = req ? req.get('host') : 'control.pagos.toyoter.com';
   const protocol = host.includes('localhost') ? 'http' : 'https';
   return `${protocol}://${host}/api/drive/callback`;
 }
@@ -27,11 +36,11 @@ function getOAuthClient(req) {
   const { google } = require('googleapis');
   const https = require('https');
   const client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
+    DEFAULT_CLIENT_ID,
+    DEFAULT_CLIENT_SECRET,
     getRedirectUri(req)
   );
-  // Desactivar keep-alive para evitar error "Premature close" en Node.js de Render
+  // Desactivar keep-alive para evitar error "Premature close" en Node.js
   client.transporter.instance.defaults.agent = new https.Agent({ keepAlive: false });
   return client;
 }
@@ -39,37 +48,31 @@ function getOAuthClient(req) {
 function getAuthorizedClient() {
   const client = getOAuthClient();
 
-  // 0. Preferir archivo local si ya cuenta con permiso de Gmail (re-autorizado recientemente)
-  if (fs.existsSync(TOKENS_FILE)) {
-    try {
-      const localTokens = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
-      if (localTokens && localTokens.refresh_token && localTokens.scope && localTokens.scope.includes('gmail')) {
-        client.setCredentials({
-          ...localTokens,
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET
-        });
-        return client;
-      }
-    } catch (e) {}
+  // 0. Preferir archivo local en /tmp o en proyecto si ya cuenta con permiso de Gmail
+  for (const tf of [TOKENS_FILE, BUNDLED_TOKENS_FILE]) {
+    if (fs.existsSync(tf)) {
+      try {
+        const localTokens = JSON.parse(fs.readFileSync(tf, 'utf8'));
+        if (localTokens && localTokens.refresh_token && localTokens.scope && localTokens.scope.includes('gmail')) {
+          client.setCredentials({
+            ...localTokens,
+            client_id: DEFAULT_CLIENT_ID,
+            client_secret: DEFAULT_CLIENT_SECRET
+          });
+          return client;
+        }
+      } catch (e) {}
+    }
   }
   
-  // 1. Try Refresh Token from Env (Cloud Mode)
-  if (process.env.GOOGLE_REFRESH_TOKEN) {
-    console.log('Using GOOGLE_REFRESH_TOKEN from environment');
+  // 1. Usar Refresh Token permanente verificado (toyotachiapas30@gmail.com con Drive + Sheets + Gmail)
+  const activeRefreshToken = DEFAULT_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
+  if (activeRefreshToken) {
     client.setCredentials({
-      refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET
+      refresh_token: activeRefreshToken,
+      client_id: DEFAULT_CLIENT_ID,
+      client_secret: DEFAULT_CLIENT_SECRET
     });
-    return client;
-  }
-
-  // 2. Try Local File (Local Mode)
-  if (fs.existsSync(TOKENS_FILE)) {
-    console.log('Using tokens from local file:', TOKENS_FILE);
-    const tokens = JSON.parse(fs.readFileSync(TOKENS_FILE));
-    client.setCredentials(tokens);
     return client;
   }
 
@@ -190,7 +193,7 @@ router.post('/logout', async (req, res) => {
 
 // ── GET /api/drive/status  →  Check if authorized ───
 router.get('/status', (req, res) => {
-  const isAuth = fs.existsSync(TOKENS_FILE);
+  const isAuth = Boolean(getAuthorizedClient());
   res.json({ ok: true, authorized: isAuth });
 });
 
@@ -204,7 +207,7 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async 
   if (!proveedorNombre) return res.status(400).json({ ok: false, error: 'Falta el nombre del proveedor' });
 
   const drive = getGoogle().drive({ version: 'v3', auth: client });
-  const rootFolderId = parentFolderId || process.env.GOOGLE_DRIVE_FOLDER_ID;
+  const rootFolderId = parentFolderId || DEFAULT_DRIVE_FOLDER_ID;
 
   try {
     // 1. Search or create subfolder with provider name

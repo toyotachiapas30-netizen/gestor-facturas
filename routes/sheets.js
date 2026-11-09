@@ -1,24 +1,6 @@
 const express = require('express');
-// const { google } = require('googleapis'); // lazy load
-const getGoogle = () => require('googleapis').google;
-const fs = require('fs');
-const path = require('path');
+const { getAuthorizedClient, getGoogle } = require('./drive');
 const router = express.Router();
-
-const TOKENS_FILE = path.join(__dirname, '..', '.google-tokens.json');
-
-function getAuthorizedClient() {
-  if (!fs.existsSync(TOKENS_FILE)) return null;
-  const tokens = JSON.parse(fs.readFileSync(TOKENS_FILE));
-  const { google } = require('googleapis');
-  const client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `http://localhost:${process.env.PORT || 3001}/api/drive/callback`
-  );
-  client.setCredentials(tokens);
-  return client;
-}
 
 // Cells in the contrarecibo sheet (fixed positions)
 const CELL_NO_FACT  = 'D40';  // No. de Factura / Recibo

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sorteo en Vivo – Toyota Chiapas</title>
+  <meta name="description" content="Sorteo en vivo Toyota Chiapas – Gira la ruleta y descubre al ganador." />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="bg-overlay"></div>
+  <canvas id="confetti-canvas"></canvas>
+
+  <!-- WINNER MODAL -->
+  <div id="winner-modal" class="winner-modal hidden">
+    <div class="winner-card">
+      <div class="winner-trophy">🏆</div>
+      <h2 class="winner-label">¡GANADOR!</h2>
+      <div id="winner-name-display" class="winner-name"></div>
+      <p class="winner-sub">¡Felicidades! Bienvenido a la Familia Toyota</p>
+      <div class="winner-btns">
+        <button id="btn-show-thanks" class="btn-show-thanks">🎉 Mostrar Mensaje</button>
+        <button id="btn-close-modal" class="btn-close-modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- THANK-YOU SCREEN -->
+  <div id="thanks-modal" class="thanks-modal hidden">
+    <div class="thanks-card">
+      <img src="Logo_Bienvenido.png" alt="Logo" class="thanks-logo" />
+      <div class="thanks-emoji">🤝</div>
+      <h2 class="thanks-title">Gracias por visitarnos</h2>
+      <p class="thanks-msg">Bienvenido a la<br/><strong>Familia Toyota</strong></p>
+      <button id="btn-close-thanks" class="btn-close-thanks">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div class="app-container">
+
+    <header class="app-header">
+      <span class="header-title">SORTEO EN VIVO</span>
+      <span class="header-sub">Toyota Chiapas</span>
+      <button id="btn-fullscreen" class="btn-fullscreen" title="Pantalla completa">
+        <svg id="fs-icon-expand" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <polyline points="9 21 3 21 3 15"></polyline>
+          <line x1="21" y1="3" x2="14" y2="10"></line>
+          <line x1="3" y1="21" x2="10" y2="14"></line>
+        </svg>
+        <svg id="fs-icon-compress" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <polyline points="4 14 10 14 10 20"></polyline>
+          <polyline points="20 10 14 10 14 4"></polyline>
+          <line x1="10" y1="14" x2="3" y2="21"></line>
+          <line x1="21" y1="3" x2="14" y2="10"></line>
+        </svg>
+      </button>
+    </header>
+
+    <div class="main-layout">
+
+      <!-- LEFT PANEL -->
+      <aside class="panel-names">
+        <h3 class="panel-title">📋 Participantes</h3>
+        <div class="input-row">
+          <input id="name-input" type="text" placeholder="Escribe un nombre..." maxlength="40" />
+          <button id="btn-add" title="Agregar">＋</button>
+        </div>
+
+        <div class="panel-logo-area">
+          <img src="Logo_Bienvenido.png" alt="Logo Evento" class="panel-logo" />
+        </div>
+
+        <ul id="names-list" class="names-list"></ul>
+        <div class="panel-actions">
+          <span id="names-count" class="names-count">0 participantes</span>
+          <button id="btn-clear" class="btn-danger">Limpiar todo</button>
+        </div>
+      </aside>
+
+      <!-- CENTER: Wheel -->
+      <section class="wheel-section">
+        <div class="wheel-wrapper">
+          <div class="wheel-pointer">▼</div>
+          <canvas id="wheel-canvas" width="480" height="480"></canvas>
+        </div>
+        <button id="btn-spin" class="btn-spin" disabled>
+          <span class="spin-icon">🎰</span>
+          GIRAR RULETA
+        </button>
+        <p class="spin-hint">Agrega al menos 2 participantes para girar</p>
+      </section>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

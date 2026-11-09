@@ -27,13 +27,29 @@ function authorizeGasto(req, gasto) {
 }
 
 let _db = null;
+const os = require('os');
+
+function getDataDir() {
+  if (process.env.VERCEL) {
+    const tmpData = path.join(os.tmpdir(), 'gestor_data');
+    if (!fs.existsSync(tmpData)) fs.mkdirSync(tmpData, { recursive: true });
+    const tmpDb = path.join(tmpData, 'gastos.db');
+    const bundledDb = path.join(__dirname, '..', 'data', 'gastos.db');
+    if (!fs.existsSync(tmpDb) && fs.existsSync(bundledDb)) {
+      try { fs.copyFileSync(bundledDb, tmpDb); } catch (e) {}
+    }
+    return tmpData;
+  }
+  const localData = path.join(__dirname, '..', 'data');
+  if (!fs.existsSync(localData)) fs.mkdirSync(localData, { recursive: true });
+  return localData;
+}
 
 function getDB() {
   if (_db) return _db;
   
   const Database = require('better-sqlite3');
-  const DATA_DIR = path.join(__dirname, '..', 'data');
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const DATA_DIR = getDataDir();
   
   _db = new Database(path.join(DATA_DIR, 'gastos.db'));
   _db.pragma('journal_mode = WAL');
@@ -632,7 +648,7 @@ async function backupDatabaseToDrive() {
   if (isBackingUp) return;
   isBackingUp = true;
 
-  const DATA_DIR = path.join(__dirname, '..', 'data');
+  const DATA_DIR = getDataDir();
   const dbPath = path.join(DATA_DIR, 'gastos.db');
   const backupTempPath = path.join(DATA_DIR, 'gastos_backup.db');
 
@@ -708,8 +724,7 @@ async function backupDatabaseToDrive() {
 }
 
 async function restoreDatabaseFromDrive() {
-  const DATA_DIR = path.join(__dirname, '..', 'data');
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const DATA_DIR = getDataDir();
   const dbPath = path.join(DATA_DIR, 'gastos.db');
   const tempPath = path.join(DATA_DIR, 'gastos_download.db.tmp');
 

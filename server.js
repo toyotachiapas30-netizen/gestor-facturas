@@ -67,6 +67,24 @@ function gestorAuth(req, res, next) {
   res.redirect('/login.html');
 }
 
+let vercelInitPromise = null;
+app.use(async (req, res, next) => {
+  if (process.env.VERCEL && !vercelInitPromise) {
+    vercelInitPromise = (async () => {
+      try {
+        const { restoreDatabaseFromDrive } = require('./routes/gastos');
+        await restoreDatabaseFromDrive();
+      } catch (e) {}
+      try {
+        const { restoreTokensFromDatabase } = require('./routes/drive');
+        await restoreTokensFromDatabase();
+      } catch (e) {}
+    })();
+    await vercelInitPromise;
+  }
+  next();
+});
+
 // Aplicar middleware de autenticación antes de servir archivos estáticos
 app.use(gestorAuth);
 
@@ -414,7 +432,11 @@ async function startServer() {
   }, 9 * 60 * 1000);
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+module.exports = app;
 
 // ── Manejadores de Apagado Seguro (Graceful Shutdown) ──────
 async function handleShutdown(signal) {
