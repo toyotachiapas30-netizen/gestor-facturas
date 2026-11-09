@@ -13,9 +13,6 @@ const TOKENS_FILE = process.env.VERCEL
   : path.join(__dirname, '..', '.google-tokens.json');
 const BUNDLED_TOKENS_FILE = path.join(__dirname, '..', '.google-tokens.json');
 
-const DEFAULT_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const DEFAULT_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const DEFAULT_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
 const DEFAULT_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '1i0gZJ2kSI6_7pt9fIWrDkk-s3EIWOxVc';
 
 // Dynamic Redirect URI (Cloud vs Local)
@@ -36,8 +33,8 @@ function getOAuthClient(req) {
   const { google } = require('googleapis');
   const https = require('https');
   const client = new google.auth.OAuth2(
-    DEFAULT_CLIENT_ID,
-    DEFAULT_CLIENT_SECRET,
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
     getRedirectUri(req)
   );
   // Desactivar keep-alive para evitar error "Premature close" en Node.js
@@ -47,6 +44,8 @@ function getOAuthClient(req) {
 
 function getAuthorizedClient() {
   const client = getOAuthClient();
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
   // 0. Preferir archivo local en /tmp o en proyecto si ya cuenta con permiso de Gmail
   for (const tf of [TOKENS_FILE, BUNDLED_TOKENS_FILE]) {
@@ -56,8 +55,8 @@ function getAuthorizedClient() {
         if (localTokens && localTokens.refresh_token && localTokens.scope && localTokens.scope.includes('gmail')) {
           client.setCredentials({
             ...localTokens,
-            client_id: DEFAULT_CLIENT_ID,
-            client_secret: DEFAULT_CLIENT_SECRET
+            client_id: clientId,
+            client_secret: clientSecret
           });
           return client;
         }
@@ -66,12 +65,12 @@ function getAuthorizedClient() {
   }
   
   // 1. Usar Refresh Token permanente verificado (toyotachiapas30@gmail.com con Drive + Sheets + Gmail)
-  const activeRefreshToken = DEFAULT_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
+  const activeRefreshToken = process.env.GOOGLE_REFRESH_TOKEN;
   if (activeRefreshToken) {
     client.setCredentials({
       refresh_token: activeRefreshToken,
-      client_id: DEFAULT_CLIENT_ID,
-      client_secret: DEFAULT_CLIENT_SECRET
+      client_id: clientId,
+      client_secret: clientSecret
     });
     return client;
   }
