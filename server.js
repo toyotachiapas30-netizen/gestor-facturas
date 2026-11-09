@@ -13,7 +13,54 @@ const app = express();
 const PORT = process.env.PORT || 3001; 
 
 app.use(cors());
+
+// ── Puente Inverso para Buzón Farrera (Puerto 443 estándar para Muse en la nube) ──
+const { getBridgeConfig, saveBridgeConfig, handleBuzonProxy } = require('./utils/buzon-bridge');
+
+app.get('/buzon', async (req, res) => {
+  if (req.query.directo === '1') {
+    const bridge = await getBridgeConfig(true);
+    if (bridge && bridge.url) {
+      return res.redirect(`${bridge.url}/buzonfecg.aspx`);
+    }
+  }
+  return res.redirect('/buzonfecg.aspx');
+});
+
+app.use((req, res, next) => {
+  const p = req.path;
+  if (
+    p === '/buzonfecg.aspx' ||
+    p === '/ScriptResource.axd' ||
+    p === '/WebResource.axd' ||
+    p === '/jsUpdateProgress.js' ||
+    p.startsWith('/App_Themes/') ||
+    p.startsWith('/Scripts/')
+  ) {
+    return handleBuzonProxy(req, res);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
+
+// Endpoints para registrar y consultar el puente de la PC Windows de la oficina
+app.post('/api/buzon-bridge/register', async (req, res) => {
+  const { url, hostname, key } = req.body || {};
+  if (key !== 'toyota2026') {
+    return res.status(403).json({ ok: false, error: 'Clave inválida' });
+  }
+  if (!url) {
+    return res.status(400).json({ ok: false, error: 'Falta URL del túnel' });
+  }
+  const saved = await saveBridgeConfig({ url, hostname });
+  return res.json({ ok: true, bridge: saved });
+});
+
+app.get('/api/buzon-bridge/status', async (req, res) => {
+  const bridge = await getBridgeConfig(true);
+  return res.json({ ok: true, bridge });
+});
 
 // Ruta de diagnóstico para verificar que el servidor responde
 app.get('/debug-servidor', (req, res) => {
@@ -48,7 +95,12 @@ function gestorAuth(req, res, next) {
     '/toyota-chiapas.png', 
     '/farrera-poniente.png', 
     '/api/auth/login',
-    '/api/drive/callback'
+    '/api/drive/callback',
+    '/api/buzon-bridge/register',
+    '/api/buzon-bridge/status',
+    '/Instalar_Puente_Buzon_Farrera_Windows.bat',
+    '/buzon',
+    '/buzonfecg.aspx'
   ];
   
   if (allowed.includes(p) || p === '/login') {
