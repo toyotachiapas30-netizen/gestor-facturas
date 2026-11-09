@@ -1384,6 +1384,573 @@ setInterval(async () => {
   }
 }, 60000);
 
+// ── BANDEJA DE COMPROBANTES DE PAGO (TOYOTA CHIAPAS ORIENTE / MATRIZ) ─────────
+
+const PROVEEDOR_ALIASES = {
+  ADACH: ['ASOCIACION DE DISTRIBUIDORES DE AUTOMOVILES DE CHIAPAS', 'ADACH'],
+  GREENBOX: ['YAXALOSIL Y SUSTENTABILIDAD AMBIENTAL GREENBOX', 'YAXALOSIL SUSTENTABILIDAD AMBIENTAL GREENBOX', 'GREENBOX'],
+  YAXALOSIL: ['YAXALOSIL Y SUSTENTABILIDAD AMBIENTAL GREENBOX', 'YAXALOSIL SUSTENTABILIDAD AMBIENTAL GREENBOX'],
+  REHABILITACIONES: ['REHABILITACIONES Y REMODELACIONES INGENIA', 'INGENIA'],
+  INGENIA: ['REHABILITACIONES Y REMODELACIONES INGENIA'],
+  ROGELIO: ['ROGELIO ROQUE DOMINGUEZ'],
+  OFIMAGEN: ['OFIMAGEN'],
+  'GRUPO MC': ['GRUPO MC SEGURIDAD Y TECNOLOGIA'],
+  PATTISON: ['ANUNCIOS PATTISON'],
+  TRITON: ['SAMUEL YANEZ GONZALEZ', 'SAMUEL YAÑEZ GONZALEZ'],
+  SAMUEL: ['SAMUEL YANEZ GONZALEZ', 'SAMUEL YAÑEZ GONZALEZ'],
+  ENMEDIO: ['ENMEDIO COMUNICACION DIGITAL MEXICO', 'ENMEDIO COMUNICACION DIGITAL DE MEXICO'],
+  'ANA MARIA': ['ANA MARIA AGUILAR GOMEZ'],
+  MANUEL: ['MANUEL DE JESUS GUTIERREZ HERNANDEZ'],
+  GLORIA: ['GLORIA ELIZABETH GUZMAN HERNANDEZ'],
+  LUIS: ['LUIS ARMANDO IBARRA YAMAMOTO'],
+  YAMAMOTO: ['LUIS ARMANDO IBARRA YAMAMOTO'],
+  LIZBETH: ['LIZBETH MAZA ORDONEZ', 'LIZBETH MAZA ORDOÑEZ'],
+  HUGO: ['HUGO ENRIQUE GARCIA TOVILLA'],
+  ALSE: ['ALSE MEXICANA'],
+  SEFESO: ['SEFESO']
+};
+
+function normalizeSearchText(str = '') {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseComprobantePdfInfo(filename = '', subject = '') {
+  const base = String(filename || '').replace(/\.pdf$/i, '').trim();
+  let operacion = '';
+  let proveedorRaw = '';
+  let monto = 0;
+  let isTreasuryFormat = false;
+
+  // Formato estándar Tesorería Grupo Farrera: "549598t_549598 ROGELIO,ROQUE 6940.pdf"
+  const m1 = base.match(/^(\d+[a-z]?_\d+)\s+(.+?)\s+\$?([\d,]+(?:\.\d+)?)$/i);
+  if (m1) {
+    operacion = m1[1].trim();
+    proveedorRaw = m1[2].replace(/[,_]+/g, ' ').trim();
+    monto = parseFloat(m1[3].replace(/,/g, '')) || 0;
+    isTreasuryFormat = true;
+  } else {
+    // Alternativo: "549598 PROVEEDOR 6940"
+    const m2 = base.match(/^(\d{5,})\s+(.+?)\s+\$?([\d,]+(?:\.\d+)?)$/i);
+    if (m2) {
+      operacion = m2[1].trim();
+      proveedorRaw = m2[2].replace(/[,_]+/g, ' ').trim();
+      monto = parseFloat(m2[3].replace(/,/g, '')) || 0;
+      isTreasuryFormat = true;
+    } else {
+      // Buscar monto en el nombre o en el asunto
+      const mMontoFile = base.match(/\$?\b([\d]{1,3}(?:,[\d]{3})+(?:\.\d{1,2})?|[\d]{3,7}(?:\.\d{1,2}))\b$/);
+      if (mMontoFile) {
+        monto = parseFloat(mMontoFile[1].replace(/,/g, '')) || 0;
+        proveedorRaw = base.slice(0, mMontoFile.index).replace(/[,_-]+/g, ' ').trim();
+      } else {
+        const mMontoSubj = String(subject || '').match(/\$\s*([\d,]+(?:\.\d{1,2})?)/);
+        if (mMontoSubj) {
+          monto = parseFloat(mMontoSubj[1].replace(/,/g, '')) || 0;
+        }
+        proveedorRaw = base.replace(/[,_-]+/g, ' ').trim();
+      }
+    }
+  }
+
+  // Detectar Folio si viene en el asunto (ej. "Folio 31650" o "Folio: A1375")
+  let folioDetectado = '';
+  const mFolio = String(subject || '').match(/\bfolio[:\s#*-]+([A-Za-z0-9-]+)/i);
+  if (mFolio) {
+    folioDetectado = mFolio[1].trim();
+  }
+
+  return {
+    operacion,
+    proveedorDetectado: proveedorRaw || base,
+    montoDetectado: monto,
+    folioDetectado,
+    isTreasuryFormat
+  };
+}
+
+function isNonReceiptDocument(filename = '', subject = '') {
+  const upperFile = normalizeSearchText(filename);
+  const upperSubj = normalizeSearchText(subject);
+  const ignorePatterns = [
+    'CONSTANCIA',
+    'OPINION',
+    '32D',
+    '32 D',
+    'CHECK LIST',
+    'CHECKLIST',
+    'PROTOCOLO',
+    'DECLARACION',
+    'BOLETIN',
+    'INCENTIVOS',
+    'CARATULA',
+    'REGISTRO REUNION',
+    'COTIZACION',
+    'PROGRAMACION CURSOS',
+    'NOMINA',
+    'IDENTIFICACION',
+    'CURP',
+    'CEDULA',
+    'DOMICILIO',
+    'CONTRATO',
+    'CARTA DE USO',
+    'ESQUEMA DE CALIFICACION',
+    'ACTIVIDADES 4T',
+    'VTS ',
+    'RECEIPT ',
+    'INVOICE '
+  ];
+  for (const pat of ignorePatterns) {
+    if (upperFile.includes(pat)) return true;
+  }
+  if (upperSubj.includes('ACTUALIZACION DE CONTRATO') || upperSubj.includes('RENOVACION DE CONTRATO') || upperSubj.includes('CHECK LIST')) {
+    return true;
+  }
+  return false;
+}
+
+function findBestGastoForComprobante(info, fechaCorreoMs, gastosOriente) {
+  const normProv = normalizeSearchText(info.proveedorDetectado);
+  const provTokens = normProv.split(' ').filter(t => t.length >= 3 && !['DE', 'DEL', 'LOS', 'LAS', 'PARA', 'POR', 'CON', 'SA', 'CV', 'SAPI'].includes(t));
+
+  // Expandir posibles nombres oficiales vía diccionario de alias
+  const aliasTargets = [];
+  for (const [key, list] of Object.entries(PROVEEDOR_ALIASES)) {
+    if (normProv.includes(key)) {
+      list.forEach(item => aliasTargets.push(normalizeSearchText(item)));
+    }
+  }
+
+  // La factura debe haberse emitido a más tardar el mismo día en que llegó el comprobante de pago (hora México)
+  const maxInvoiceDateStr = fechaCorreoMs
+    ? new Date(fechaCorreoMs - 6 * 3600 * 1000).toISOString().slice(0, 10)
+    : '2099-12-31';
+
+  let bestCandidate = null;
+  let bestScore = 0;
+
+  for (const g of gastosOriente) {
+    let score = 0;
+    const gProv = normalizeSearchText(g.proveedor);
+    const gFolio = normalizeSearchText(g.folio);
+    const gMonto = parseFloat(g.monto) || 0;
+    const gFecha = String(g.fecha_factura || g.fecha_solicitud || '').slice(0, 10);
+
+    // Si la factura se emitió días después de que llegó este comprobante de pago, no puede ser el pago de esa factura futura
+    if (gFecha && gFecha > maxInvoiceDateStr) {
+      continue;
+    }
+
+    // 1. Coincidencia exacta de Folio en el asunto (ej. "Folio 31650")
+    if (info.folioDetectado && gFolio && gFolio === normalizeSearchText(info.folioDetectado)) {
+      score += 70;
+    }
+
+    // 2. Coincidencia de Monto
+    if (info.montoDetectado > 0 && gMonto > 0) {
+      const diff = Math.abs(gMonto - info.montoDetectado);
+      if (diff < 0.05) {
+        score += 65;
+      } else if (diff <= 1.0) {
+        score += 45;
+      }
+    }
+
+    // 3. Coincidencia de Proveedor (directa o por alias)
+    let provMatched = false;
+    if (normProv && gProv) {
+      if (gProv.includes(normProv) || normProv.includes(gProv)) {
+        score += 50;
+        provMatched = true;
+      } else if (aliasTargets.some(a => gProv.includes(a) || a.includes(gProv))) {
+        score += 50;
+        provMatched = true;
+      } else if (provTokens.length > 0) {
+        const hitCount = provTokens.filter(t => gProv.includes(t)).length;
+        if (hitCount > 0) {
+          score += Math.min(45, hitCount * 22);
+          provMatched = true;
+        }
+      }
+    }
+
+    // Para considerar un emparejamiento válido, debe coincidir el proveedor (o el folio explícito)
+    if (!provMatched && (!info.folioDetectado || gFolio !== normalizeSearchText(info.folioDetectado))) {
+      continue;
+    }
+
+    // Preferir la factura cuya fecha sea más cercana a la fecha del comprobante de pago
+    if (gFecha && fechaCorreoMs) {
+      const gMs = new Date(gFecha + 'T12:00:00Z').getTime();
+      const daysDiff = Math.max(0, (fechaCorreoMs - gMs) / 86400000);
+      if (daysDiff <= 45) {
+        score += Math.max(0, 15 - Math.floor(daysDiff / 3));
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestCandidate = g;
+    }
+  }
+
+  if (bestScore >= 60 && bestCandidate) {
+    return { gasto: bestCandidate, score: bestScore };
+  }
+  return null;
+}
+
+// ── GET /api/mail/comprobantes ────────────────────────────
+router.get('/comprobantes', async (req, res) => {
+  try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).json({ ok: false, error: 'La Bandeja de Comprobantes es exclusiva para el trabajador 9997.' });
+    }
+    const client = getAuthorizedClient();
+    if (!client) {
+      return res.status(401).json({
+        ok: false,
+        needsAuth: true,
+        error: 'Google no está autorizado. Conecta tu cuenta para leer la Bandeja de Comprobantes.'
+      });
+    }
+
+    const { mes = 'todos', anio = 'todos', limit = '40' } = req.query;
+    const maxResults = Math.min(Math.max(parseInt(limit, 10) || 40, 5), 60);
+
+    // Buscar correos con PDFs o ZIPs de comprobantes de pago de Toyota Chiapas (Oriente/Matriz), excluyendo Poniente
+    let gmailQuery = 'has:attachment (filename:pdf OR filename:zip) (from:cxp@toyotachiapas.com OR from:kaizen@toyotachiapas.com OR from:chiapastoyota@gmail.com OR subject:comprobante OR subject:comprobantes OR "t_") -from:coord.admin@toyotafarreraponiente.mx -from:payments-noreply@google.com';
+
+    if (anio && anio !== 'todos') {
+      const y = parseInt(anio, 10);
+      if (!isNaN(y)) {
+        if (mes && mes !== 'todos') {
+          const m = parseInt(mes, 10);
+          if (!isNaN(m) && m >= 1 && m <= 12) {
+            const startDate = new Date(Date.UTC(y, m - 1, 1));
+            startDate.setUTCDate(startDate.getUTCDate() - 1);
+            const endDate = new Date(Date.UTC(y, m, 2));
+            const fmt = d => `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
+            gmailQuery += ` after:${fmt(startDate)} before:${fmt(endDate)}`;
+          }
+        } else {
+          gmailQuery += ` after:${y - 1}/12/31 before:${y + 1}/01/02`;
+        }
+      }
+    }
+
+    const gmail = getGoogle().gmail({ version: 'v1', auth: client });
+    const listRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: gmailQuery,
+      maxResults
+    });
+
+    const messages = listRes?.data?.messages || [];
+    const db = getDB();
+
+    // Cargar gastos de Toyota Chiapas (Oriente / Matriz) para emparejamiento automático
+    const allGastos = db.prepare(`
+      SELECT id, uuid, fecha_factura, fecha_solicitud, proveedor, folio, monto, concepto, estatus, sucursal, categoria, comprobante_pago_url
+      FROM gastos
+      ORDER BY fecha_factura DESC, created_at DESC
+    `).all();
+
+    const gastosOriente = allGastos.filter(g => {
+      const suc = String(g.sucursal || '').trim();
+      const cat = String(g.categoria || '').trim().toUpperCase();
+      if (suc === 'Toyota Farrera Poniente' || cat === 'TOYOTA PONIENTE') return false;
+      return true;
+    });
+
+    const estadosRows = db.prepare('SELECT id_clave, message_id, estatus, uuid FROM bandeja_estado').all();
+    const estadoByClave = new Map();
+    const gastoManualByClave = new Map();
+    for (const e of estadosRows) {
+      if (e.id_clave) {
+        estadoByClave.set(String(e.id_clave).trim().toUpperCase(), e.estatus);
+        if (e.uuid) gastoManualByClave.set(String(e.id_clave).trim().toUpperCase(), e.uuid);
+      }
+    }
+
+    const comprobantesList = [];
+    const BATCH_SIZE = 6;
+
+    for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+      const slice = messages.slice(i, i + BATCH_SIZE);
+      const batchRes = await Promise.all(slice.map(async (m) => {
+        try {
+          const msgRes = await gmail.users.messages.get({
+            userId: 'me',
+            id: m.id,
+            format: 'full'
+          });
+          const msgData = msgRes.data;
+          const headers = msgData.payload?.headers || [];
+          const subject = getHeader(headers, 'Subject') || '(Sin asunto)';
+          const fromHeader = getHeader(headers, 'From');
+          const sender = parseSender(fromHeader);
+          const fechaMs = parseInt(msgData.internalDate || '0', 10) || Date.now();
+
+          const fromLower = (sender.email || '').toLowerCase();
+          const subjUpper = normalizeSearchText(subject);
+
+          // Excluir Poniente
+          if (fromLower.includes('toyotafarreraponiente') || (subjUpper.includes('PONIENTE') && !subjUpper.includes('CHIAPAS'))) {
+            return [];
+          }
+
+          const rawParts = extractPartsRecursive(msgData.payload);
+          if (rawParts.length === 0) return [];
+
+          // Si el correo contiene facturas XML, es un correo de factura nueva (va en Bandeja de Entrada, no en Comprobantes)
+          const hasXml = rawParts.some(p => /\.xml$/i.test(p.filename));
+          if (hasXml) return [];
+
+          // Expandir PDFs sueltos o dentro de ZIP
+          const pdfParts = [];
+          for (const p of rawParts) {
+            if (/\.pdf$/i.test(p.filename)) {
+              pdfParts.push(p);
+            } else if (/\.zip$/i.test(p.filename)) {
+              const zipBuf = await fetchPartBuffer(gmail, m.id, p);
+              if (zipBuf) {
+                const entries = extractZipBuffer(zipBuf);
+                for (const entry of entries) {
+                  if (/\.pdf$/i.test(entry.filename)) {
+                    pdfParts.push({
+                      filename: entry.filename,
+                      mimeType: 'application/pdf',
+                      attachmentId: `ZIP_${p.attachmentId}:::${encodeURIComponent(entry.entryPath)}`,
+                      size: entry.size
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          if (pdfParts.length === 0) return [];
+
+          const isFromCxp = fromLower.includes('cxp@toyotachiapas.com');
+          const hasComprobanteSubj = subjUpper.includes('COMPROBANTE DE PAGO') || subjUpper.includes('COMPROBANTES DE PAGO') || subjUpper.startsWith('PAGO ');
+
+          const items = [];
+          for (const pdf of pdfParts) {
+            if (isNonReceiptDocument(pdf.filename, subject)) continue;
+
+            const info = parseComprobantePdfInfo(pdf.filename, subject);
+            // Solo incluir si tiene formato de tesorería (ej. 549598t_549598 ...) o viene de CXP / asunto explícito de comprobante de pago
+            if (!info.isTreasuryFormat && !isFromCxp && !hasComprobanteSubj) {
+              continue;
+            }
+
+            const idClave = `COMP_${m.id}_${pdf.filename}`.toUpperCase();
+            const manualEstado = estadoByClave.get(idClave) || null;
+            if (manualEstado === 'borrado') continue;
+
+            // Verificar si ya se vinculó manualmente o por emparejamiento automático
+            let matchedGasto = null;
+            const linkedGastoId = gastoManualByClave.get(idClave);
+            if (linkedGastoId) {
+              matchedGasto = gastosOriente.find(g => g.id === linkedGastoId) || null;
+            }
+            if (!matchedGasto) {
+              const best = findBestGastoForComprobante(info, fechaMs, gastosOriente);
+              if (best) matchedGasto = best.gasto;
+            }
+
+            let estatus = 'pendiente';
+            if (manualEstado === 'descartado') {
+              estatus = 'descartado';
+            } else if (manualEstado === 'procesado' || (matchedGasto && matchedGasto.estatus === 'pagado' && matchedGasto.comprobante_pago_url)) {
+              estatus = 'procesado';
+            }
+
+            items.push({
+              idClave,
+              messageId: m.id,
+              attachmentId: pdf.attachmentId,
+              filename: pdf.filename,
+              size: pdf.size || 0,
+              subject,
+              fromName: sender.name,
+              fromEmail: sender.email,
+              fechaMs,
+              operacion: info.operacion,
+              proveedorDetectado: info.proveedorDetectado,
+              montoDetectado: info.montoDetectado,
+              folioDetectado: info.folioDetectado,
+              estatus,
+              gastoSugerido: matchedGasto
+                ? {
+                    id: matchedGasto.id,
+                    proveedor: matchedGasto.proveedor,
+                    folio: matchedGasto.folio,
+                    monto: matchedGasto.monto,
+                    fecha_factura: matchedGasto.fecha_factura,
+                    concepto: matchedGasto.concepto,
+                    estatus: matchedGasto.estatus,
+                    comprobante_pago_url: matchedGasto.comprobante_pago_url
+                  }
+                : null
+            });
+          }
+
+          return items;
+        } catch (e) {
+          return [];
+        }
+      }));
+
+      for (const arr of batchRes) {
+        if (Array.isArray(arr) && arr.length > 0) {
+          comprobantesList.push(...arr);
+        }
+      }
+    }
+
+    // Filtrar por año y mes exactos en hora de México si se seleccionó filtro
+    const filtered = comprobantesList.filter(item => {
+      if (anio && anio !== 'todos') {
+        const d = new Date(item.fechaMs - 6 * 3600 * 1000);
+        if (String(d.getUTCFullYear()) !== String(anio)) return false;
+        if (mes && mes !== 'todos') {
+          const mStr = String(d.getUTCMonth() + 1).padStart(2, '0');
+          if (mStr !== String(mes).padStart(2, '0')) return false;
+        }
+      }
+      return true;
+    });
+
+    filtered.sort((a, b) => b.fechaMs - a.fechaMs);
+
+    // Lista de gastos de Toyota Chiapas (Oriente) para el selector manual/sugerido en cada tarjeta
+    const gastosDisponibles = gastosOriente.slice(0, 120).map(g => ({
+      id: g.id,
+      proveedor: g.proveedor,
+      folio: g.folio,
+      monto: g.monto,
+      fecha_factura: g.fecha_factura,
+      estatus: g.estatus,
+      comprobante_pago_url: g.comprobante_pago_url
+    }));
+
+    return res.json({
+      ok: true,
+      comprobantes: filtered,
+      gastosDisponibles
+    });
+  } catch (err) {
+    console.error('🔥 Error en GET /api/mail/comprobantes:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── POST /api/mail/comprobantes/vincular ──────────────────
+// Toma un PDF de la Bandeja de Comprobantes, lo sube a la carpeta del proveedor en Google Drive,
+// actualiza comprobante_pago_url y estatus='pagado' en Control de Gastos y sincroniza Google Sheets.
+router.post('/comprobantes/vincular', async (req, res) => {
+  try {
+    if (!isAuthorizedBandejaUser(req)) {
+      return res.status(403).json({ ok: false, error: 'Exclusivo para el trabajador 9997.' });
+    }
+    const { messageId, attachmentId, filename, gastoId, idClave } = req.body || {};
+    if (!messageId || !attachmentId || !gastoId) {
+      return res.status(400).json({ ok: false, error: 'Faltan datos para vincular el comprobante (messageId, attachmentId, gastoId).' });
+    }
+
+    const db = getDB();
+    const gasto = db.prepare('SELECT * FROM gastos WHERE id = ?').get(gastoId);
+    if (!gasto) {
+      return res.status(404).json({ ok: false, error: 'No se encontró el gasto seleccionado en Control de Gastos.' });
+    }
+
+    const client = getAuthorizedClient();
+    if (!client) {
+      return res.status(401).json({ ok: false, error: 'Google no está autorizado.' });
+    }
+
+    const gmail = getGoogle().gmail({ version: 'v1', auth: client });
+    const drive = getGoogle().drive({ version: 'v3', auth: client });
+
+    // 1. Descargar el PDF del comprobante desde Gmail
+    const pdfBuffer = await resolveAttachmentBuffer(gmail, messageId, attachmentId, filename || 'comprobante.pdf');
+    if (!pdfBuffer || pdfBuffer.length === 0) {
+      return res.status(404).json({ ok: false, error: 'No se pudo descargar el PDF del comprobante desde Gmail.' });
+    }
+
+    // 2. Buscar o crear la carpeta del proveedor en Google Drive
+    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID || '1i0gZJ2kSI6_7pt9fIWrDkk-s3EIWOxVc';
+    const safeProvName = String(gasto.proveedor || 'PROVEEDOR').replace(/'/g, "\\'");
+    const searchRes = await drive.files.list({
+      q: `'${rootFolderId}' in parents and name='${safeProvName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'files(id)'
+    });
+
+    let folderId;
+    if (searchRes.data.files && searchRes.data.files.length > 0) {
+      folderId = searchRes.data.files[0].id;
+    } else {
+      const newFolder = await drive.files.create({
+        requestBody: {
+          name: gasto.proveedor || 'PROVEEDOR',
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [rootFolderId]
+        },
+        fields: 'id'
+      });
+      folderId = newFolder.data.id;
+    }
+
+    // 3. Subir el PDF a Drive con el formato estándar PAGO_<folio>_<filename>
+    const cleanFilename = filename || 'Comprobante_Pago.pdf';
+    const driveFileName = `PAGO_${gasto.folio || 'S-F'}_${cleanFilename}`;
+    const driveRes = await drive.files.create({
+      requestBody: {
+        name: driveFileName,
+        parents: [folderId]
+      },
+      media: {
+        mimeType: 'application/pdf',
+        body: require('stream').Readable.from(pdfBuffer)
+      },
+      fields: 'id, webViewLink'
+    });
+
+    const webViewLink = driveRes.data.webViewLink;
+
+    // 4. Actualizar gasto a PAGADO y guardar registro en bandeja_estado
+    db.prepare('UPDATE gastos SET comprobante_pago_url = ?, estatus = ? WHERE id = ?').run(webViewLink, 'pagado', gastoId);
+
+    if (idClave) {
+      db.prepare(`
+        INSERT INTO bandeja_estado (id_clave, uuid, message_id, estatus, updated_at)
+        VALUES (?, ?, ?, 'procesado', datetime('now','localtime'))
+        ON CONFLICT(id_clave) DO UPDATE SET uuid = excluded.uuid, estatus = 'procesado', updated_at = datetime('now','localtime')
+      `).run(String(idClave).trim().toUpperCase(), gastoId, messageId);
+    }
+
+    await backupDatabaseToDrive();
+
+    return res.json({
+      ok: true,
+      url: webViewLink,
+      gastoId,
+      proveedor: gasto.proveedor,
+      folio: gasto.folio
+    });
+  } catch (err) {
+    console.error('🔥 Error en POST /api/mail/comprobantes/vincular:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Rutas Legacy Apple Mail ───────────────────────────────
 function searchMailAppleScript(searchTerm) {
   const script = `

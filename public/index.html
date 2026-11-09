@@ -39,6 +39,9 @@
     <button class="main-tab" id="tab-bandeja" data-view="bandeja" onclick="switchMainView('bandeja')" style="display:none;">
       📥 Bandeja de Entrada <span id="bandeja-badge-pendientes" class="bandeja-tab-badge" style="display:none;">0</span>
     </button>
+    <button class="main-tab" id="tab-comprobantes" data-view="comprobantes" onclick="switchMainView('comprobantes')" style="display:none;">
+      💸 Bandeja de Comprobantes <span id="comprobantes-badge-pendientes" class="bandeja-tab-badge" style="display:none;">0</span>
+    </button>
     <button class="main-tab active" data-view="facturas" onclick="switchMainView('facturas')">
       🧾 Flujo de Facturas
     </button>
@@ -221,6 +224,96 @@
     <div id="bandeja-list">
       <div class="card" style="text-align:center; padding:40px; color:#64748b;">
         ⏳ Cargando correos con facturas desde tu bandeja...
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       VIEW: BANDEJA DE COMPROBANTES DE PAGO
+  ═══════════════════════════════════════════ -->
+  <div class="main-view" id="view-comprobantes">
+
+    <!-- Tarjetas de Resumen (KPIs Comprobantes) -->
+    <div class="gastos-summary" style="margin-bottom: 18px;">
+      <div class="summary-card">
+        <div class="sc-label">💸 Comprobantes en Bandeja</div>
+        <div class="sc-value" id="comp-stat-total">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="sc-label">⏳ Pendientes por Vincular</div>
+        <div class="sc-value yellow" id="comp-stat-pendientes">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="sc-label">✅ Ya Vinculados (Pagados)</div>
+        <div class="sc-value green" id="comp-stat-procesados">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="sc-label">💰 Monto en Comprobantes</div>
+        <div class="sc-value blue" id="comp-stat-monto">$0.00</div>
+      </div>
+    </div>
+
+    <!-- Barra de Filtros Comprobantes -->
+    <div class="card" style="padding: 18px; margin-bottom: 20px;">
+      <div class="gastos-toolbar" style="margin-bottom:0;">
+        <div class="gastos-filters" style="width:100%;">
+          <div class="field" style="margin:0; flex:2; min-width:220px;">
+            <label style="font-size:11px;">Buscar Proveedor / Operación / Folio / Archivo</label>
+            <input type="text" id="comp-search" placeholder="🔍 Escribe proveedor, operación (ej. 549598), folio o monto..." oninput="renderComprobantes()" style="padding:8px 12px; font-size:13px;" />
+          </div>
+          <div class="field" style="margin:0; min-width:110px;">
+            <label style="font-size:11px;">Año</label>
+            <select id="comp-anio" onchange="loadComprobantes(true)">
+              <option value="todos">Todos</option>
+              <option value="2026" selected>2026</option>
+              <option value="2025">2025</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0; min-width:130px;">
+            <label style="font-size:11px;">Mes</label>
+            <select id="comp-mes" onchange="loadComprobantes(true)">
+              <option value="todos">Todos</option>
+              <option value="01">Enero</option>
+              <option value="02">Febrero</option>
+              <option value="03">Marzo</option>
+              <option value="04">Abril</option>
+              <option value="05">Mayo</option>
+              <option value="06">Junio</option>
+              <option value="07">Julio</option>
+              <option value="08">Agosto</option>
+              <option value="09">Septiembre</option>
+              <option value="10">Octubre</option>
+              <option value="11">Noviembre</option>
+              <option value="12">Diciembre</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0; min-width:155px;">
+            <label style="font-size:11px;">Estatus</label>
+            <select id="comp-estatus" onchange="renderComprobantes()">
+              <option value="todos">Todos</option>
+              <option value="pendiente">⏳ Pendientes</option>
+              <option value="procesado">✅ Ya Vinculados</option>
+              <option value="descartado">🚫 Descartados</option>
+            </select>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <div style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:999px; background:#ecfdf5; border:1px solid #a7f3d0; color:#047857; font-size:11px; font-weight:700; white-space:nowrap;">
+              <span style="width:8px; height:8px; border-radius:50%; background:#10b981; display:inline-block;"></span>
+              <span>Toyota Chiapas (Oriente)</span>
+            </div>
+            <button class="btn btn-primary" id="btn-refresh-comprobantes" onclick="loadComprobantes(true)" style="padding:9px 16px; font-size:13px; white-space:nowrap;">
+              <span class="spinner" id="spin-comprobantes"></span> 🔄 Actualizar Comprobantes
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contenedor de Tarjetas de Comprobantes -->
+    <div id="comprobantes-list">
+      <div class="card" style="text-align:center; padding:40px; color:#64748b;">
+        ⏳ Cargando comprobantes de pago de Toyota Chiapas desde tu bandeja...
       </div>
     </div>
 

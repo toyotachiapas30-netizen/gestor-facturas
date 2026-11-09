@@ -122,6 +122,7 @@ function switchMainView(view) {
   document.querySelectorAll('.main-view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
   if (view === 'gastos') loadGastos();
   if (view === 'bandeja') loadBandeja();
+  if (view === 'comprobantes') loadComprobantes();
 }
 
 // ── Step navigation ───────────────────────────────────────────────────────────
@@ -1524,11 +1525,15 @@ async function checkUserRole() {
         tag.textContent = fullName ? `${icon} ${fullName} · ${roleLabel}` : `${icon} ${roleLabel}`;
       }
 
-      // Mostrar la pestaña Bandeja de Entrada ÚNICAMENTE al trabajador 9997
+      // Mostrar la pestaña Bandeja de Entrada y Bandeja de Comprobantes ÚNICAMENTE al trabajador 9997
       const tabBandeja = document.getElementById('tab-bandeja');
+      const tabComprobantes = document.getElementById('tab-comprobantes');
       const is9997 = userEmp === '9997';
       if (tabBandeja) {
         tabBandeja.style.display = is9997 ? '' : 'none';
+      }
+      if (tabComprobantes) {
+        tabComprobantes.style.display = is9997 ? '' : 'none';
       }
 
       if (!initialViewResolved) {
@@ -2518,32 +2523,414 @@ window.addEventListener('DOMContentLoaded', async () => {
   const bandAnio = document.getElementById('bandeja-anio');
   if (bandAnio) bandAnio.value = String(currentYear);
 
+  const compAnio = document.getElementById('comp-anio');
+  if (compAnio) compAnio.value = String(currentYear);
+
   applyRoleRestrictions();
 
   checkGoogleAuth();
   populateCategorias();
   if (userEmp === '9997') {
     loadBandeja();
+    loadComprobantes();
     loadTelegramStatus();
     // Sincronización automática en tiempo real cada 25 segundos (silenciosa, sin recargar pantalla)
     setInterval(() => {
       if (userEmp === '9997' && document.visibilityState === 'visible') {
         loadBandeja(false, true);
+        loadComprobantes(false, true);
       }
     }, 25000);
     // Sincronizar también en cuanto el usuario regrese a la ventana/pestaña
     window.addEventListener('focus', () => {
-      if (userEmp === '9997') loadBandeja(false, true);
+      if (userEmp === '9997') {
+        loadBandeja(false, true);
+        loadComprobantes(false, true);
+      }
     });
     document.addEventListener('visibilitychange', () => {
       if (userEmp === '9997' && document.visibilityState === 'visible') {
         loadBandeja(false, true);
+        loadComprobantes(false, true);
       }
     });
   }
   loadGastos();
   loadProveedores();
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BANDEJA DE COMPROBANTES DE PAGO (TOYOTA CHIAPAS ORIENTE / MATRIZ)
+// ══════════════════════════════════════════════════════════════════════════════
+
+window.comprobantesItems = [];
+window.comprobantesGastosDisponibles = [];
+let comprobantesLoading = false;
+const COMPROBANTES_CACHE_KEY = 'comprobantes_instant_cache_v1';
+
+function saveComprobantesInstantCache(items, gastosDisp) {
+  try {
+    localStorage.setItem(COMPROBANTES_CACHE_KEY, JSON.stringify({ items: items || [], gastosDisp: gastosDisp || [] }));
+  } catch (e) {}
+}
+
+function restoreComprobantesInstantCache() {
+  try {
+    const raw = localStorage.getItem(COMPROBANTES_CACHE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+      window.comprobantesItems = parsed.items;
+      window.comprobantesGastosDisponibles = parsed.gastosDisp || [];
+      renderComprobantes();
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+async function loadComprobantes(force = false, silent = false) {
+  if (comprobantesLoading && !force) return;
+  comprobantesLoading = true;
+
+  const btn = document.getElementById('btn-refresh-comprobantes');
+  const spin = document.getElementById('spin-comprobantes');
+
+  if (window.comprobantesItems.length === 0) {
+    restoreComprobantesInstantCache();
+  }
+
+  if (!silent) {
+    if (btn) btn.disabled = true;
+    if (spin) spin.style.display = 'inline-block';
+  }
+
+  const listEl = document.getElementById('comprobantes-list');
+  if (!silent && listEl && window.comprobantesItems.length === 0) {
+    listEl.innerHTML = `
+      <div class="card" style="text-align:center; padding:45px 20px; color:#475569;">
+        <div style="font-size:32px; margin-bottom:10px;">💸</div>
+        <div style="font-weight:600; font-size:15px;">Buscando Comprobantes de Pago de Toyota Chiapas...</div>
+        <div style="font-size:13px; color:#64748b; margin-top:4px;">Analizando PDFs de Tesorería / CXP y emparejando automáticamente con Control de Gastos.</div>
+      </div>
+    `;
+  }
+
+  try {
+    const anio = document.getElementById('comp-anio')?.value || 'todos';
+    const mes = document.getElementById('comp-mes')?.value || 'todos';
+    const res = await fetch(`/api/mail/comprobantes?anio=${encodeURIComponent(anio)}&mes=${encodeURIComponent(mes)}`, { cache: 'no-store' });
+    const data = await res.json();
+
+    if (!data.ok) {
+      if (!silent && listEl && window.comprobantesItems.length === 0) {
+        listEl.innerHTML = `<div class="card" style="text-align:center; padding:35px; color:#dc2626; font-weight:600;">⚠️ ${esc(data.error || 'Error al cargar comprobantes')}</div>`;
+      }
+      return;
+    }
+
+    window.comprobantesItems = data.comprobantes || [];
+    window.comprobantesGastosDisponibles = data.gastosDisponibles || [];
+    saveComprobantesInstantCache(window.comprobantesItems, window.comprobantesGastosDisponibles);
+    renderComprobantes();
+  } catch (err) {
+    console.warn('Error cargando comprobantes:', err.message);
+  } finally {
+    comprobantesLoading = false;
+    if (btn) btn.disabled = false;
+    if (spin) spin.style.display = 'none';
+  }
+}
+
+function renderComprobantes() {
+  const listEl = document.getElementById('comprobantes-list');
+  if (!listEl) return;
+
+  const q = (document.getElementById('comp-search')?.value || '').trim().toLowerCase();
+  const estFilter = document.getElementById('comp-estatus')?.value || 'todos';
+
+  const items = window.comprobantesItems || [];
+  let totalCount = 0;
+  let pendientesCount = 0;
+  let procesadosCount = 0;
+  let montoTotal = 0;
+
+  items.forEach(it => {
+    totalCount++;
+    const m = parseFloat(it.montoDetectado) || 0;
+    if (it.estatus === 'pendiente') {
+      pendientesCount++;
+      montoTotal += m;
+    } else if (it.estatus === 'procesado') {
+      procesadosCount++;
+      montoTotal += m;
+    }
+  });
+
+  const elTot = document.getElementById('comp-stat-total');
+  const elPend = document.getElementById('comp-stat-pendientes');
+  const elProc = document.getElementById('comp-stat-procesados');
+  const elMonto = document.getElementById('comp-stat-monto');
+  const badgeTab = document.getElementById('comprobantes-badge-pendientes');
+
+  if (elTot) elTot.textContent = totalCount;
+  if (elPend) elPend.textContent = pendientesCount;
+  if (elProc) elProc.textContent = procesadosCount;
+  if (elMonto) elMonto.textContent = fmtMonto(String(montoTotal), 'MXN');
+
+  if (badgeTab) {
+    if (pendientesCount > 0) {
+      badgeTab.style.display = 'inline-block';
+      badgeTab.textContent = pendientesCount;
+    } else {
+      badgeTab.style.display = 'none';
+    }
+  }
+
+  const filtered = items.filter(it => {
+    if (estFilter !== 'todos' && it.estatus !== estFilter) return false;
+    if (q) {
+      const hay = [
+        it.filename,
+        it.proveedorDetectado,
+        it.operacion,
+        it.folioDetectado,
+        it.subject,
+        it.fromName,
+        it.fromEmail,
+        it.montoDetectado,
+        it.gastoSugerido?.proveedor,
+        it.gastoSugerido?.folio
+      ].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `
+      <div class="card" style="text-align:center; padding:45px 20px; color:#64748b;">
+        <div style="font-size:30px; margin-bottom:8px;">✨</div>
+        <div style="font-weight:600; color:#334155;">No se encontraron comprobantes con los filtros seleccionados</div>
+        <div style="font-size:13px; margin-top:4px;">Aquí aparecerán automáticamente los PDFs de comprobantes de pago de Toyota Chiapas (Oriente).</div>
+      </div>
+    `;
+    return;
+  }
+
+  const gastosDisp = window.comprobantesGastosDisponibles || [];
+
+  listEl.innerHTML = filtered.map((it, idx) => {
+    const isProc = it.estatus === 'procesado';
+    const isDesc = it.estatus === 'descartado';
+
+    let badgeHtml = '<span class="bandeja-status-pill pendiente">⏳ Pendiente por Vincular</span>';
+    if (isProc) badgeHtml = '<span class="bandeja-status-pill procesado">✅ Vinculado (PAGADO)</span>';
+    else if (isDesc) badgeHtml = '<span class="bandeja-status-pill descartado">🚫 Descartado</span>';
+
+    const previewUrl = `/api/mail/attachment/${encodeURIComponent(it.messageId)}/${encodeURIComponent(it.attachmentId)}?filename=${encodeURIComponent(it.filename)}&mimeType=application%2Fpdf`;
+    const downloadUrl = `${previewUrl}&download=1`;
+
+    const sug = it.gastoSugerido;
+    const selectId = `comp-gasto-sel-${idx}`;
+    const btnVincularId = `btn-comp-vincular-${idx}`;
+
+    // Construir opciones del selector de Gasto en Control de Gastos
+    const optionsHtml = [
+      `<option value="">— Selecciona el gasto en Control de Gastos para vincular —</option>`
+    ];
+
+    // Si hay sugerido, ponerlo primero o marcarlo seleccionado
+    gastosDisp.forEach(g => {
+      const selected = (sug && sug.id === g.id) ? 'selected' : '';
+      const estTag = g.estatus === 'pagado' ? '✅ PAGADO' : '⏳ EN PROCESO';
+      const montoStr = fmtMonto(String(g.monto || 0), 'MXN');
+      const fechaStr = g.fecha_factura || 'S/F';
+      optionsHtml.push(
+        `<option value="${esc(g.id)}" ${selected}>[${estTag}] ${esc(g.proveedor)} • Folio: ${esc(g.folio || 'S/F')} • ${montoStr} (${esc(fechaStr)})</option>`
+      );
+    });
+
+    const matchBannerHtml = sug
+      ? `<div style="background:${isProc ? '#ecfdf5' : '#eff6ff'}; border:1px solid ${isProc ? '#a7f3d0' : '#bfdbfe'}; border-radius:8px; padding:10px 12px; margin-top:10px; font-size:12.5px; color:#1e293b; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+          <div>
+            <strong style="color:${isProc ? '#047857' : '#1d4ed8'};">${isProc ? '✅ Emparejado con Gasto Pagado:' : '🎯 Factura detectada automáticamente:'}</strong>
+            <span style="margin-left:6px; font-weight:700;">${esc(sug.proveedor)}</span>
+            <span style="color:#475569;"> • Folio: <strong>${esc(sug.folio || '—')}</strong> • Monto: <strong>${fmtMonto(String(sug.monto || 0), 'MXN')}</strong> (${esc(sug.fecha_factura || '—')})</span>
+          </div>
+          ${sug.comprobante_pago_url ? `<a href="${esc(sug.comprobante_pago_url)}" target="_blank" class="btn btn-outline" style="padding:4px 10px; font-size:11.5px; text-decoration:none; color:#047857; border-color:#6ee7b7; background:#fff;">📂 Ver en Drive ↗</a>` : ''}
+        </div>`
+      : '';
+
+    return `
+      <div class="bandeja-card ${isProc ? 'is-procesado' : ''} ${isDesc ? 'is-descartado' : ''}" style="margin-bottom:16px;">
+        <div class="bandeja-card-header">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span style="font-size:15px; font-weight:800; color:#0f172a;">💸 ${esc(it.proveedorDetectado || it.filename)}</span>
+              ${it.operacion ? `<span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:#f1f5f9; color:#334155; font-family:monospace;">Op: ${esc(it.operacion)}</span>` : ''}
+              ${it.folioDetectado ? `<span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:#fef3c7; color:#92400e;">Folio: ${esc(it.folioDetectado)}</span>` : ''}
+              ${badgeHtml}
+            </div>
+            <div style="font-size:12px; color:#64748b; margin-top:4px;">
+              📩 <strong>${esc(it.fromName)}</strong> (${esc(it.fromEmail)}) • Asunto: <em>${esc(it.subject)}</em>
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:18px; font-weight:800; color:#047857;">
+              ${it.montoDetectado ? fmtMonto(String(it.montoDetectado), 'MXN') : '—'}
+            </div>
+            <div style="font-size:11.5px; color:#64748b;">📅 ${fmtEmailDate(it.fechaMs)}</div>
+          </div>
+        </div>
+
+        <div class="bandeja-card-body" style="padding-top:12px;">
+          <!-- Archivo PDF del Comprobante con botones de Vista Previa y Descarga -->
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px;">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:#1e293b;">
+              <span>📑</span>
+              <span>${esc(it.filename)}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <a href="${previewUrl}" target="_blank" class="btn btn-outline" style="padding:6px 12px; font-size:12px; text-decoration:none;">
+                👁️ Ver PDF
+              </a>
+              <a href="${downloadUrl}" download="${esc(it.filename)}" class="btn btn-outline" style="padding:6px 12px; font-size:12px; text-decoration:none; color:#0284c7; border-color:#7dd3fc; background:#f0f9ff; font-weight:700;">
+                ⬇️ Descargar Comprobante
+              </a>
+            </div>
+          </div>
+
+          ${matchBannerHtml}
+
+          <!-- Selector de Gasto y Botón de 1 clic para Vincular a Drive + Control de Gastos -->
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-top:12px; padding-top:12px; border-top:1px dashed #e2e8f0;">
+            <div style="flex:1; min-width:260px;">
+              <label style="font-size:11px; color:#475569; font-weight:600; display:block; margin-bottom:4px;">
+                Vincular con registro en Control de Gastos (Toyota Chiapas):
+              </label>
+              <select id="${selectId}" style="width:100%; padding:8px 10px; font-size:12.5px; border-radius:8px; border:1px solid #cbd5e1;">
+                ${optionsHtml.join('')}
+              </select>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; align-self:flex-end;">
+              <button class="btn btn-primary" id="${btnVincularId}" onclick="vincularComprobanteAGasto(${idx}, '${selectId}', '${btnVincularId}')" style="padding:9px 16px; font-size:12.5px; font-weight:700; background:#059669; border-color:#059669;">
+                ${isProc ? '🔄 Volver a Subir / Actualizar en Gastos' : '✅ Subir a Drive y Marcar PAGADO'}
+              </button>
+              ${!isDesc
+                ? `<button class="btn btn-outline" onclick="setComprobanteEstado('${esc(it.idClave)}', '${esc(it.messageId)}', 'descartado')" style="padding:8px 12px; font-size:12px; color:#64748b;">🚫 Descartar</button>`
+                : `<button class="btn btn-outline" onclick="setComprobanteEstado('${esc(it.idClave)}', '${esc(it.messageId)}', 'pendiente')" style="padding:8px 12px; font-size:12px;">↩️ Restaurar</button>`
+              }
+              <button class="btn btn-outline" onclick="borrarComprobanteBandeja('${esc(it.idClave)}', '${esc(it.messageId)}')" style="padding:8px 12px; font-size:12px; color:#dc2626; border-color:#fca5a5;" title="Quitar de la bandeja">
+                🗑️
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function vincularComprobanteAGasto(idx, selectId, btnId) {
+  const q = (document.getElementById('comp-search')?.value || '').trim().toLowerCase();
+  const estFilter = document.getElementById('comp-estatus')?.value || 'todos';
+  const filtered = (window.comprobantesItems || []).filter(it => {
+    if (estFilter !== 'todos' && it.estatus !== estFilter) return false;
+    if (q) {
+      const hay = [
+        it.filename,
+        it.proveedorDetectado,
+        it.operacion,
+        it.folioDetectado,
+        it.subject,
+        it.fromName,
+        it.fromEmail,
+        it.montoDetectado,
+        it.gastoSugerido?.proveedor,
+        it.gastoSugerido?.folio
+      ].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const item = filtered[idx];
+  if (!item) return;
+
+  const selEl = document.getElementById(selectId);
+  const gastoId = selEl ? selEl.value : '';
+  if (!gastoId) {
+    alert('Por favor selecciona la factura correspondiente en la lista desplegable para vincular este comprobante de pago.');
+    return;
+  }
+
+  const btn = document.getElementById(btnId);
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Subiendo a Drive y marcando PAGADO...';
+  }
+
+  try {
+    const res = await fetch('/api/mail/comprobantes/vincular', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messageId: item.messageId,
+        attachmentId: item.attachmentId,
+        filename: item.filename,
+        gastoId,
+        idClave: item.idClave
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo vincular el comprobante.');
+    }
+
+    await loadComprobantes(true);
+    loadGastos();
+  } catch (err) {
+    alert('Error al vincular comprobante: ' + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
+}
+
+async function setComprobanteEstado(idClave, messageId, estatus) {
+  try {
+    await fetch('/api/mail/estado', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idClave, messageId, estatus })
+    });
+    const found = (window.comprobantesItems || []).find(x => x.idClave === idClave);
+    if (found) found.estatus = estatus;
+    saveComprobantesInstantCache(window.comprobantesItems, window.comprobantesGastosDisponibles);
+    renderComprobantes();
+  } catch (err) {
+    alert('Error al actualizar estatus: ' + err.message);
+  }
+}
+
+async function borrarComprobanteBandeja(idClave, messageId) {
+  if (!confirm('¿Quitar este comprobante de la Bandeja de Comprobantes?')) return;
+  try {
+    await fetch('/api/mail/estado', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idClave, messageId, estatus: 'borrado' })
+    });
+    window.comprobantesItems = (window.comprobantesItems || []).filter(x => x.idClave !== idClave);
+    saveComprobantesInstantCache(window.comprobantesItems, window.comprobantesGastosDisponibles);
+    renderComprobantes();
+  } catch (err) {
+    alert('Error al quitar comprobante: ' + err.message);
+  }
+}
 
 /** Helper to convert base64 to Blob for PDF display */
 function b64toBlob(b64Data, contentType = '', sliceSize = 512) {
