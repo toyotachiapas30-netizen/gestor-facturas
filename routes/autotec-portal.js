@@ -292,6 +292,9 @@ router.get('/status/:jobId', (req, res) => {
   if (!job) {
     return res.status(404).json({ ok: false, error: 'La tarea expiró o el servidor se reinició. Intenta de nuevo.' });
   }
+  if (job.status === 'done' || job.status === 'error') {
+    setTimeout(() => portalJobs.delete(req.params.jobId), 5000);
+  }
   return res.json({ ok: true, ...job });
 });
 

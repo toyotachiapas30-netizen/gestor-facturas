@@ -473,6 +473,9 @@ router.get('/captura-xml-status/:jobId', (req, res) => {
   if (!job) {
     return res.status(404).json({ ok: false, error: 'La tarea del SAT expiró o el servidor se reinició. Intenta de nuevo.' });
   }
+  if (job.status === 'done' || job.status === 'error') {
+    setTimeout(() => satJobs.delete(req.params.jobId), 5000);
+  }
   return res.json({ ok: true, ...job });
 });
 

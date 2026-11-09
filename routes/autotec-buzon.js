@@ -1,4 +1,7 @@
 const express = require('express');
+const axios = require('axios');
+const https = require('https');
+const FormData = require('form-data');
 const { launchBrowser } = require('../utils/browser');
 const { getAuthorizedClient, getGoogle } = require('./drive');
 const fs = require('fs');
@@ -16,12 +19,53 @@ const DEFAULT_BUZON_NOMBRE   = 'YONI JAVIER RUIZ DOMINGUEZ';
 const DEFAULT_BUZON_TELEFONO = '8718645133';
 const DEFAULT_BUZON_CORREO   = 'chiapastoyota@gmail.com';
 const URL_BUZON = 'https://autotec.farrera.net:60002/buzonfecg.aspx';
+const farreraHttpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-// Trabajos asíncronos para evitar el timeout de 30s del proxy de Vercel cuando Farrera tarda >1 min
+// Trabajos asíncronos para evitar el timeout de 30s del proxy de Vercel
 const buzonJobs = new Map();
 
+function extractHiddenValue(html, fieldName) {
+  const escaped = fieldName.replace(/\$/g, '\\$');
+  const m1 = html.match(new RegExp(`name="${escaped}"[^>]*value="([^"]*)"`, 'i'));
+  if (m1) return m1[1];
+  const m2 = html.match(new RegExp(`id="${escaped}"[^>]*value="([^"]*)"`, 'i'));
+  return m2 ? m2[1] : '';
+}
+
+function stripHtmlTags(str) {
+  return (str || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractSpanText(html, id) {
+  const m = html.match(new RegExp(`id="${id}"[^>]*>([\\s\\S]*?)<\\/span>`, 'i'));
+  return m ? stripHtmlTags(m[1]) : '';
+}
+
+function extractAlertFromScript(html) {
+  const m = html.match(/muestraaviso\(\s*['"]([^'"]+)['"]\s*\)/i) || html.match(/alert\(\s*['"]([^'"]+)['"]\s*\)/i);
+  return m ? m[1].trim() : '';
+}
+
+function mergeCookies(oldCookieStr, setCookieHeader) {
+  const map = new Map();
+  if (oldCookieStr) {
+    oldCookieStr.split(';').forEach(part => {
+      const [k, ...v] = part.trim().split('=');
+      if (k) map.set(k.trim(), v.join('='));
+    });
+  }
+  if (Array.isArray(setCookieHeader)) {
+    setCookieHeader.forEach(raw => {
+      const first = raw.split(';')[0];
+      const [k, ...v] = first.trim().split('=');
+      if (k) map.set(k.trim(), v.join('='));
+    });
+  }
+  return Array.from(map.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
 async function runBuzonJob(jobId, params) {
-  const { xmlPath, pdfPath, nombre, telefono, correo, ordenCompra, soloValidar } = params;
+  const { xmlPath, pdfPath, xmlOriginalName, pdfOriginalName, nombre, telefono, correo, ordenCompra, soloValidar } = params;
   const setStep = (step) => {
     const j = buzonJobs.get(jobId);
     if (j) j.step = step;
@@ -29,128 +73,136 @@ async function runBuzonJob(jobId, params) {
 
   let browser = null;
   try {
-    setStep('⏳ 1/4 Abriendo portal buzonfecg.aspx de Grupo Farrera...');
-    browser = await launchBrowser(['--ignore-certificate-errors', '--disable-web-security']);
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 960 });
-
-    await page.goto(URL_BUZON, { waitUntil: 'domcontentloaded', timeout: 50000 });
-    await page.waitForSelector('#ctl00_ContentPlaceHolder1_txtNombre, input[type="text"]', { timeout: 25000 });
-
-    // 1. Llenar Nombre, Teléfono (8718645133), Correo y Orden de Compra
-    await page.evaluate((datos) => {
-      const setVal = (id, fallbackIdx, val) => {
-        let el = document.getElementById(id);
-        if (!el) {
-          const all = document.querySelectorAll('input[type="text"]');
-          el = all[fallbackIdx];
-        }
-        if (el) {
-          el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      };
-      setVal('ctl00_ContentPlaceHolder1_txtNombre', 0, datos.nombre);
-      setVal('ctl00_ContentPlaceHolder1_txtTelefono', 1, datos.telefono);
-      setVal('ctl00_ContentPlaceHolder1_txtMail', 2, datos.correo);
-      if (datos.ordenCompra) {
-        setVal('ctl00_ContentPlaceHolder1_txtOrdenCompra', 3, datos.ordenCompra);
+    // 1. Abrir sesión HTTP con buzonfecg.aspx
+    setStep('⏳ 1/4 Conectando con portal buzonfecg.aspx de Grupo Farrera...');
+    const initResp = await axios.get(URL_BUZON, {
+      httpsAgent: farreraHttpsAgent,
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
       }
-    }, { nombre, telefono, correo, ordenCompra });
+    });
 
-    // 2. Subir archivo XML
+    let cookies = mergeCookies('', initResp.headers['set-cookie']);
+    const initHtml = initResp.data || '';
+
+    // 2. Enviar PostBack de "Validar" con el archivo XML
     setStep('⏳ 2/4 Subiendo y validando XML en servidor Farrera...');
-    const xmlInput = (await page.$('#ctl00_ContentPlaceHolder1_FileUploadXML')) || (await page.$('input[type="file"]'));
-    if (!xmlInput) throw new Error('No se encontró el campo para subir el XML en el Buzón.');
-    await xmlInput.uploadFile(xmlPath);
+    const fdValida = new FormData();
+    fdValida.append('ctl00_ToolkitScriptManager1_HiddenField', '');
+    fdValida.append('__EVENTTARGET', 'ctl00$ContentPlaceHolder1$btnValidaXML');
+    fdValida.append('__EVENTARGUMENT', '');
+    fdValida.append('__VIEWSTATE', extractHiddenValue(initHtml, '__VIEWSTATE'));
+    fdValida.append('__VIEWSTATEGENERATOR', extractHiddenValue(initHtml, '__VIEWSTATEGENERATOR'));
+    fdValida.append('__EVENTVALIDATION', extractHiddenValue(initHtml, '__EVENTVALIDATION'));
+    fdValida.append('ctl00$ContentPlaceHolder1$txtNombre', nombre);
+    fdValida.append('ctl00$ContentPlaceHolder1$txtTelefono', telefono);
+    fdValida.append('ctl00$ContentPlaceHolder1$txtMail', correo);
+    fdValida.append('ctl00$ContentPlaceHolder1$txtOrdenCompra', ordenCompra || '');
+    fdValida.append('ctl00$ContentPlaceHolder1$FileUploadXML', fs.createReadStream(xmlPath), {
+      filename: xmlOriginalName || path.basename(xmlPath),
+      contentType: 'text/xml'
+    });
+    fdValida.append('ctl00$ContentPlaceHolder1$FileUploadPDF', Buffer.alloc(0), {
+      filename: '',
+      contentType: 'application/octet-stream'
+    });
 
-    await new Promise((r) => setTimeout(r, 800));
-
-    // 3. Hacer clic en "Validar"
-    const validarBtn = await page.$('#ctl00_ContentPlaceHolder1_btnValidaXML, a[id*="btnValidaXML" i], input[value*="Validar" i]');
-    if (validarBtn) {
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 75000 }).catch(() => {}),
-        page.evaluate((el) => el.click(), validarBtn).catch(() => {})
-      ]);
-    }
-    await new Promise((r) => setTimeout(r, 2500));
-
-    // 4. Adjuntar PDF si se habilitó el campo
-    let pdfSubido = false;
-    if (pdfPath) {
-      setStep('⏳ 3/4 Adjuntando archivo PDF de la factura...');
-      for (let intento = 0; intento < 4 && !pdfSubido; intento++) {
-        try {
-          const pdfInput = await page.$('#ctl00_ContentPlaceHolder1_FileUploadPDF, input[id*="FileUploadPDF" i]');
-          if (pdfInput) {
-            await page.evaluate((el) => {
-              el.style.visibility = 'visible';
-              el.style.display = 'inline-block';
-            }, pdfInput);
-            await pdfInput.uploadFile(pdfPath);
-            pdfSubido = true;
-          } else {
-            const allFiles = await page.$$('input[type="file"]');
-            if (allFiles.length > 1) {
-              await allFiles[1].uploadFile(pdfPath);
-              pdfSubido = true;
-            } else {
-              await new Promise((r) => setTimeout(r, 2000));
-            }
-          }
-        } catch (e) {
-          await new Promise((r) => setTimeout(r, 2000));
-        }
+    const valResp = await axios.post(URL_BUZON, fdValida, {
+      httpsAgent: farreraHttpsAgent,
+      timeout: 45000,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      headers: {
+        ...fdValida.getHeaders(),
+        Cookie: cookies,
+        Origin: 'https://autotec.farrera.net:60002',
+        Referer: URL_BUZON,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
       }
-    }
+    });
 
-    // 5. Hacer clic en el botón final de "Enviar / Guardar" (sin reenviar para evitar duplicados)
+    cookies = mergeCookies(cookies, valResp.headers['set-cookie']);
+    let currentHtml = valResp.data || '';
+    const msgTrasValidar = extractSpanText(currentHtml, 'ctl00_ContentPlaceHolder1_lblMensaje');
+    const avisoTrasValidar = extractSpanText(currentHtml, 'ctl00_ContentPlaceHolder1_lblAviso') || extractAlertFromScript(currentHtml);
+
+    // 3. Si el XML fue validado y apareció btnEnviar, adjuntar el PDF y enviar
+    let pdfSubido = false;
     let enviadoFinal = false;
-    if (!soloValidar) {
-      setStep('⏳ 4/4 Enviando registro final al Buzón Farrera (puede tardar ~1 min)...');
-      const sendClicked = await page.evaluate(() => {
-        const candidates = Array.from(document.querySelectorAll('a.sexybutton, input[type="submit"], button, a[id*="ContentPlaceHolder1"]'));
-        const target = candidates.find((el) => {
-          const id = (el.id || '').toLowerCase();
-          const txt = (el.innerText || el.value || '').trim().toLowerCase();
-          if (id.includes('btnvalidaxml')) return false;
-          return (
-            id.includes('enviar') ||
-            id.includes('guardar') ||
-            id.includes('aceptar') ||
-            id.includes('subir') ||
-            txt === 'enviar' ||
-            txt.includes('enviar factura') ||
-            txt.includes('guardar') ||
-            txt.includes('registrar')
-          );
-        });
-        if (target) {
-          target.click();
-          return target.id || target.innerText || 'clicked';
-        }
-        return null;
+    const tieneBtnEnviar = /id="ctl00_ContentPlaceHolder1_btnEnviar"/i.test(currentHtml);
+
+    if (!soloValidar && pdfPath && tieneBtnEnviar) {
+      setStep('⏳ 3/4 Adjuntando PDF y registrando factura en Buzón Farrera...');
+      const fdEnviar = new FormData();
+      fdEnviar.append('ctl00_ToolkitScriptManager1_HiddenField', '');
+      fdEnviar.append('__EVENTTARGET', 'ctl00$ContentPlaceHolder1$btnEnviar');
+      fdEnviar.append('__EVENTARGUMENT', '');
+      fdEnviar.append('__VIEWSTATE', extractHiddenValue(currentHtml, '__VIEWSTATE'));
+      fdEnviar.append('__VIEWSTATEGENERATOR', extractHiddenValue(currentHtml, '__VIEWSTATEGENERATOR'));
+      fdEnviar.append('__EVENTVALIDATION', extractHiddenValue(currentHtml, '__EVENTVALIDATION'));
+      fdEnviar.append('ctl00$ContentPlaceHolder1$txtNombre', nombre);
+      fdEnviar.append('ctl00$ContentPlaceHolder1$txtTelefono', telefono);
+      fdEnviar.append('ctl00$ContentPlaceHolder1$txtMail', correo);
+      fdEnviar.append('ctl00$ContentPlaceHolder1$txtOrdenCompra', ordenCompra || '');
+      fdEnviar.append('ctl00$ContentPlaceHolder1$FileUploadPDF', fs.createReadStream(pdfPath), {
+        filename: pdfOriginalName || path.basename(pdfPath),
+        contentType: 'application/pdf'
       });
 
-      if (sendClicked) {
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 95000 }).catch(() => {});
-        await new Promise((r) => setTimeout(r, 3500));
-        enviadoFinal = true;
-      }
+      const envResp = await axios.post(URL_BUZON, fdEnviar, {
+        httpsAgent: farreraHttpsAgent,
+        timeout: 60000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        headers: {
+          ...fdEnviar.getHeaders(),
+          Cookie: cookies,
+          Origin: 'https://autotec.farrera.net:60002',
+          Referer: URL_BUZON,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
+      });
+
+      currentHtml = envResp.data || currentHtml;
+      pdfSubido = true;
+      enviadoFinal = true;
     }
 
-    const estadoBuzon = await page.evaluate(() => {
-      const aviso = document.getElementById('ctl00_ContentPlaceHolder1_lblAviso')?.innerText?.trim() || '';
-      const msg = document.getElementById('ctl00_ContentPlaceHolder1_lblMensaje')?.innerText?.trim() || '';
-      const bodyText = document.body?.innerText || '';
-      return {
-        aviso,
-        mensaje: msg,
-        registradaExito: /registrad[ao]|correctamente|éxito|exito|recibid[ao]/i.test(`${aviso} ${msg} ${bodyText}`)
+    const avisoFinal = extractSpanText(currentHtml, 'ctl00_ContentPlaceHolder1_lblAviso') || extractAlertFromScript(currentHtml) || avisoTrasValidar;
+    const msgFinal = extractSpanText(currentHtml, 'ctl00_ContentPlaceHolder1_lblMensaje') || msgTrasValidar;
+    const registradaExito = /registrad[ao]|correctamente|éxito|exito|recibid[ao]|enviad[ao]/i.test(`${avisoFinal} ${msgFinal}`);
+
+    // 4. Renderizar el HTML oficial devuelto por buzonfecg.aspx para generar la captura real y el PDF
+    setStep('⏳ 4/4 Generando captura real y PDF del Buzón Autotec...');
+    let renderHtml = currentHtml
+      .replace(/<head>/i, '<head><base href="https://autotec.farrera.net:60002/">')
+      .replace(/http:\/\/ajax\.googleapis\.com/gi, 'https://ajax.googleapis.com')
+      .replace(/<script[\s\S]*?<\/script>/gi, '');
+
+    browser = await launchBrowser();
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 920 });
+    await page.setContent(renderHtml, { waitUntil: 'load', timeout: 15000 }).catch(() => {});
+
+    // Asegurar que los datos capturados y el aviso del servidor sean visibles en la captura
+    await page.evaluate((datos) => {
+      const setIfEmpty = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && !el.value && val) el.value = val;
       };
-    });
+      setIfEmpty('ctl00_ContentPlaceHolder1_txtNombre', datos.nombre);
+      setIfEmpty('ctl00_ContentPlaceHolder1_txtTelefono', datos.telefono);
+      setIfEmpty('ctl00_ContentPlaceHolder1_txtMail', datos.correo);
+      if (datos.ordenCompra) setIfEmpty('ctl00_ContentPlaceHolder1_txtOrdenCompra', datos.ordenCompra);
+
+      const msgEl = document.getElementById('ctl00_ContentPlaceHolder1_lblMensaje');
+      if (msgEl && !msgEl.innerText.trim() && (datos.avisoFinal || datos.msgFinal)) {
+        msgEl.innerHTML = `<font color="Blue"><b>${datos.avisoFinal || datos.msgFinal}</b></font>`;
+      }
+    }, { nombre, telefono, correo, ordenCompra, avisoFinal, msgFinal });
+
+    await new Promise((r) => setTimeout(r, 400));
 
     const screenshotB64 = await page.screenshot({ fullPage: true, encoding: 'base64' });
     const pdfBuf = await page.pdf({
@@ -167,19 +219,19 @@ async function runBuzonJob(jobId, params) {
       ok: true,
       pdfSubido,
       enviadoFinal,
-      aviso: estadoBuzon.aviso,
-      mensajePortal: estadoBuzon.mensaje,
-      registradaExito: estadoBuzon.registradaExito,
+      aviso: avisoFinal,
+      mensajePortal: msgFinal,
+      registradaExito,
       datosUsados: { nombre, telefono, correo, ordenCompra },
       screenshot: `data:image/png;base64,${screenshotB64}`,
       pdfBase64: Buffer.from(pdfBuf).toString('base64'),
       mensaje: enviadoFinal
         ? 'Factura validada y enviada en el Buzón de Autotec (Nube 1).'
-        : 'Factura validada en el Buzón de Autotec (Nube 1).'
+        : 'Respuesta del Buzón de Autotec (Nube 1).'
     };
 
     buzonJobs.set(jobId, { status: 'done', step: '✅ Completado', result });
-    setTimeout(() => buzonJobs.delete(jobId), 300000);
+    setTimeout(() => buzonJobs.delete(jobId), 45000);
     return result;
   } catch (err) {
     try { fs.unlinkSync(xmlPath); } catch (e) {}
@@ -187,7 +239,7 @@ async function runBuzonJob(jobId, params) {
     if (browser) await browser.close().catch(() => {});
     console.error('🔥 [Buzón Nube 1] Error:', err.message);
     buzonJobs.set(jobId, { status: 'error', error: err.message });
-    setTimeout(() => buzonJobs.delete(jobId), 300000);
+    setTimeout(() => buzonJobs.delete(jobId), 45000);
     throw err;
   }
 }
@@ -225,13 +277,25 @@ router.post(
     const jobId = `buzon_${stamp}`;
     buzonJobs.set(jobId, { status: 'running', step: '⏳ Iniciando conexión con Buzón Autotec...' });
 
+    const jobParams = {
+      xmlPath,
+      pdfPath,
+      xmlOriginalName: xmlFile.originalname,
+      pdfOriginalName: pdfFile ? pdfFile.originalname : null,
+      nombre,
+      telefono,
+      correo,
+      ordenCompra,
+      soloValidar
+    };
+
     if (asyncMode) {
-      runBuzonJob(jobId, { xmlPath, pdfPath, nombre, telefono, correo, ordenCompra, soloValidar }).catch(() => {});
+      runBuzonJob(jobId, jobParams).catch(() => {});
       return res.json({ ok: true, asyncJob: true, jobId });
     }
 
     try {
-      const result = await runBuzonJob(jobId, { xmlPath, pdfPath, nombre, telefono, correo, ordenCompra, soloValidar });
+      const result = await runBuzonJob(jobId, jobParams);
       return res.json(result);
     } catch (err) {
       return res.status(500).json({ ok: false, error: err.message });
@@ -244,6 +308,9 @@ router.get('/buzon-status/:jobId', (req, res) => {
   const job = buzonJobs.get(req.params.jobId);
   if (!job) {
     return res.status(404).json({ ok: false, error: 'La tarea expiró o el servidor se reinició. Intenta de nuevo.' });
+  }
+  if (job.status === 'done' || job.status === 'error') {
+    setTimeout(() => buzonJobs.delete(req.params.jobId), 5000);
   }
   return res.json({ ok: true, ...job });
 });
