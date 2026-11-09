@@ -330,61 +330,8 @@
 
         <div class="alert err" id="err-step1"><span>⚠️</span><span id="err-step1-msg"></span></div>
 
-        <!-- 🏛️ VALIDACIÓN OFICIAL EN PORTAL SAT (CONSULTA POR ARCHIVO XML) -->
-        <div id="sat-portal-card" style="margin-top:16px; padding:18px; background:linear-gradient(135deg,#f8fafc 0%,#eff6ff 100%); border:2px solid #2563eb; border-radius:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <div>
-              <div style="font-size:14px; font-weight:800; color:#1e40af; display:flex; align-items:center; gap:8px;">
-                <span>🏛️ Validación Oficial en Portal SAT (Consulta por archivo XML)</span>
-              </div>
-              <div style="font-size:12px; color:#475569; margin-top:3px;">
-                Sube el archivo XML directamente a <code>verificacfdi.facturaelectronica.sat.gob.mx</code> y genera el PDF oficial de validación para Drive y el expediente.
-              </div>
-            </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <button class="btn btn-outline" id="btn-sat-portal" onclick="iniciarCapturaPortalSAT()" style="border-color:#2563eb; color:#1d4ed8; background:#fff; padding:8px 14px; font-size:12px; font-weight:700;">
-                <span class="spin" id="spin-sat-portal" style="display:none"></span> 📸 Cargar Captcha del SAT
-              </button>
-            </div>
-          </div>
-
-          <!-- Caja interactiva del Captcha -->
-          <div id="sat-captcha-box" style="display:none; margin-top:14px; padding:14px; background:#fff; border:1px solid #bfdbfe; border-radius:10px;">
-            <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
-              <img id="sat-captcha-img" src="" alt="Captcha SAT" style="height:58px; border-radius:6px; border:1px solid #cbd5e1; background:#f1f5f9;" />
-              <div style="display:flex; flex-direction:column; gap:6px; flex:1; min-width:200px;">
-                <label style="font-size:11px; font-weight:700; color:#1e3a8a; margin:0;">Escribe los 5 caracteres de la imagen del SAT:</label>
-                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <input type="text" id="inp-sat-captcha" maxlength="6" placeholder="Ej: 86780" style="width:140px; padding:8px 12px; font-size:15px; font-weight:700; letter-spacing:2px; border:2px solid #93c5fd; border-radius:8px;" onkeydown="if(event.key==='Enter') resolverCapturaPortalSAT()" />
-                  <button class="btn btn-primary" id="btn-sat-solve" onclick="resolverCapturaPortalSAT()" style="background:#1d4ed8; border-color:#1d4ed8; padding:8px 16px; font-size:13px; font-weight:700;">
-                    <span class="spin" id="spin-sat-solve" style="display:none"></span> ✅ Verificar XML en Portal SAT
-                  </button>
-                  <button class="btn btn-outline" onclick="iniciarCapturaPortalSAT()" style="padding:8px 12px; font-size:12px;" title="Obtener otra imagen de Captcha">
-                    🔄 Otro Captcha
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Resultado oficial del Portal SAT (Consulta por archivo XML) -->
-          <div id="sat-portal-result" style="display:none; margin-top:14px; padding:16px; background:#ffffff; border:2px solid #16a34a; border-radius:10px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
-              <div style="font-weight:800; color:#15803d; font-size:14px;">
-                ✅ Comprobante Validado en el Portal Oficial del SAT (Consulta por archivo XML)
-              </div>
-              <div style="display:flex; gap:8px;">
-                <a id="btn-dl-sat-pdf" href="#" download="Validacion_SAT.pdf" class="btn btn-primary" style="background:#16a34a; border-color:#16a34a; padding:7px 14px; font-size:12px; text-decoration:none;">
-                  📄 Descargar PDF Oficial SAT
-                </a>
-              </div>
-            </div>
-            <div id="sat-portal-table-preview" style="font-size:12px; color:#1e293b; overflow-x:auto;"></div>
-          </div>
-        </div>
-
-        <!-- 🪄 MAGIC BOOKMARKLET ASSISTANT (Secundario / Manual) -->
-        <div id="magic-assistant" style="display:none; margin-top:20px; padding:20px; background:linear-gradient(135deg, rgba(235,10,30,0.05), rgba(30,41,59,0.05)); border:2px solid #eb0a1e; border-radius:12px; position:relative; overflow:hidden;">
+        <!-- 🪄 MAGIC BOOKMARKLET ASSISTANT -->
+        <div id="magic-assistant" style="margin-top:20px; padding:20px; background:linear-gradient(135deg, rgba(235,10,30,0.05), rgba(30,41,59,0.05)); border:2px solid #eb0a1e; border-radius:12px; position:relative; overflow:hidden;">
           <div style="position:absolute; top:-10px; right:-10px; font-size:60px; opacity:0.05; pointer-events:none;">🪄</div>
           <div style="font-size:14px; font-weight:700; color:#eb0a1e; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
             <span>✨</span> ASISTENTE DE AUTO-LLENADO INTELIGENTE

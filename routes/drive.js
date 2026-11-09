@@ -198,7 +198,7 @@ router.get('/status', (req, res) => {
 
 // ── POST /api/drive/upload  →  Upload XML + PDF to Drive ───
 // Body: multipart form with fields xml, pdf, proveedorNombre
-router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 'sat_pdf' }]), async (req, res) => {
+router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async (req, res) => {
   const client = getAuthorizedClient();
   if (!client) return res.status(401).json({ ok: false, error: 'No autorizado con Google. Ve a Configuración.' });
 
@@ -249,17 +249,6 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 
         fields: 'id, name, webViewLink'
       });
       uploaded.push({ tipo: 'PDF', nombre: pdfRes.data.name, link: pdfRes.data.webViewLink });
-    }
-
-    // 4. Upload Validación SAT Oficial PDF (si se generó en Paso 2)
-    if (req.files['sat_pdf']) {
-      const satFile = req.files['sat_pdf'][0];
-      const satRes = await drive.files.create({
-        requestBody: { name: satFile.originalname, parents: [folderId] },
-        media: { mimeType: 'application/pdf', body: require('stream').Readable.from(satFile.buffer) },
-        fields: 'id, name, webViewLink'
-      });
-      uploaded.push({ tipo: 'SAT_PDF', nombre: satRes.data.name, link: satRes.data.webViewLink });
     }
 
     const folderLink = `https://drive.google.com/drive/folders/${folderId}`;
