@@ -39,6 +39,14 @@ function gestorAuth(req, res, next) {
   if (p.startsWith('/takata') || p.startsWith('/api/takata')) {
     return next();
   }
+
+  // Permitir Puente 24/7 (Windows / Mac en México) hacia Buzón Autotec
+  if (p.startsWith('/api/autotec/bridge/')) {
+    const bridgeKey = req.headers['x-bridge-key'] || req.query?.key;
+    if (bridgeKey === (process.env.BRIDGE_SECRET || 'toyoter_bridge_2026')) {
+      return next();
+    }
+  }
   
   // Recursos permitidos sin iniciar sesión
   const allowed = [

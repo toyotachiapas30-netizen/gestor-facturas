@@ -25,8 +25,9 @@
     </div>
     <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
       <h1 style="color: #1e293b; margin:0; font-size: 24px; font-weight:700;">Control de Gastos</h1>
-      <div style="display: flex; gap: 8px; align-items: center;">
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
         <span id="user-display-tag" style="font-size: 12px; font-weight: 600; color: #475569; background: #e2e8f0; padding: 4px 10px; border-radius: 6px; display: none;"></span>
+        <a href="https://docs.google.com/spreadsheets/d/1vh1tHeCCrM3rZvOPg5WQEiJNw5Aoc36bUB32It2AP7U/edit" target="_blank" class="btn btn-outline" style="font-size:12px;padding:6px 12px;color:#15803d;border-color:#86efac;background:#f0fdf4;text-decoration:none;">📊 Excel Google (Antigravity) ↗</a>
         <button class="btn btn-outline" style="font-size:12px;padding:6px 14px;" onclick="openSettings()">⚙️ Configuración</button>
         <button class="btn btn-outline" style="font-size:12px;padding:6px 14px;color:#ef4444;border-color:#fca5a5;" onclick="logout()">🚪 Salir</button>
       </div>
@@ -480,16 +481,26 @@
     </div>
 
     <!-- ══════════════════════════════════════════
-         PASO 4 — Nube 1: Buzón Autotec (buzonfecg.aspx) + Correo de Confirmación
+         PASO 4 — Nube 1: Buzón Autotec (buzonfecg.aspx) + Bandeja en Vivo de Confirmación
     ═══════════════════════════════════════════ -->
     <div class="step-panel" id="step-3">
       <div class="card">
-        <div class="sec-title">📬 Paso 4 — Nube 1: Buzón Autotec y Correo de Confirmación</div>
-        <p style="font-size:13px;color:var(--text-sub);margin-bottom:16px;">
-          Sube automáticamente el XML y el PDF a <code>autotec.farrera.net:60002/buzonfecg.aspx</code> y obtiene la captura real y el correo de confirmación.
-        </p>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+          <div>
+            <div class="sec-title" style="margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span>📬 Paso 4 — Nube 1: Buzón Autotec y Bandeja de Confirmación</span>
+              <span id="bridge-status-pill" style="font-size:11px; padding:3px 10px; border-radius:999px; background:#dcfce7; color:#166534; font-weight:700;">🟢 Puente 24/7 Conectado</span>
+            </div>
+            <p style="font-size:13px;color:var(--text-sub);margin:4px 0 0;">
+              Envía el XML y el PDF a <code>autotec.farrera.net:60002/buzonfecg.aspx</code> con <strong>toyotachiapas30@gmail.com</strong> y recibe aquí mismo el comprobante de <code>notifica@gfarrera.com.mx</code> listo en PDF para unir al expediente.
+            </p>
+          </div>
+          <a href="https://drive.google.com/drive/folders/1dYwzhpPkWNQcYJ67QaHGZEZNz4YVuIw2" target="_blank" class="btn btn-outline" style="padding:6px 12px; font-size:11.5px; text-decoration:none; border-color:#cbd5e1; color:#334155;">
+            💻 Carpeta Puente Windows 24/7 (Antigravity) ↗
+          </a>
+        </div>
 
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; margin-bottom:16px;">
           <div class="field" style="margin:0;">
             <label>Nombre (Buzón)</label>
             <input type="text" id="inp-buzon-nombre" value="YONI JAVIER RUIZ DOMINGUEZ" />
@@ -499,8 +510,8 @@
             <input type="text" id="inp-buzon-telefono" value="8718645133" />
           </div>
           <div class="field" style="margin:0;">
-            <label>Correo para Confirmación</label>
-            <input type="text" id="inp-buzon-correo" value="chiapastoyota@gmail.com" />
+            <label>Correo para Confirmación (Conectado a Bandeja)</label>
+            <input type="text" id="inp-buzon-correo" value="toyotachiapas30@gmail.com" />
           </div>
           <div class="field" style="margin:0;">
             <label>Orden de Compra (Opcional)</label>
@@ -511,48 +522,61 @@
         <div class="alert err" id="err-step3"><span>⚠️</span><span id="err-step3-msg"></span></div>
 
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
-          <button class="btn btn-primary" id="btn-buzon" onclick="subirBuzon(false)" style="background:#0284c7; border-color:#0284c7;">
-            <span class="spinner" id="spin-buzon"></span> 🚀 Subir y Registrar en Buzón (Nube 1)
+          <button class="btn btn-primary" id="btn-buzon" onclick="subirBuzon(false)" style="background:#0284c7; border-color:#0284c7; font-weight:700;">
+            <span class="spinner" id="spin-buzon"></span> 🚀 1. Subir y Registrar en Buzón (Nube 1)
           </button>
-          <button class="btn btn-outline" id="btn-buzon-correo" onclick="capturarCorreoConfirmacionBuzon()" style="border-color:#0284c7; color:#0369a1; font-weight:700;">
-            <span class="spinner" id="spin-buzon-correo"></span> 📧 Capturar Correo de Confirmación (notifica@gfarrera)
+          <button class="btn btn-outline" id="btn-buzon-correo" onclick="capturarCorreoConfirmacionBuzon()" style="border-color:#16a34a; color:#15803d; font-weight:700;">
+            <span class="spinner" id="spin-buzon-correo"></span> 📄 2. Generar PDF del Correo de Confirmación
+          </button>
+          <button class="btn btn-outline" onclick="cargarBandejaConfirmacionesNube1(true)" style="border-color:#0284c7; color:#0369a1; font-size:12.5px; font-weight:700;">
+            🔄 Actualizar Bandeja
           </button>
           <button class="btn btn-outline" onclick="window.open('https://autotec.farrera.net:60002/buzonfecg.aspx', '_blank')" style="font-size:12px;">
             🌐 Abrir Buzón Manual ↗
           </button>
         </div>
 
-        <!-- Resultado Buzón Nube 1 -->
-        <div id="buzon-result" style="display:none; background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:14px; margin-bottom:16px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-            <div>
-              <div style="font-weight:800; color:#0f172a; font-size:14px;" id="buzon-result-title">✅ Pantalla de Buzón Autotec Capturada</div>
-              <div style="font-size:12px; color:#475569;" id="buzon-result-sub">Se guardó automáticamente en la carpeta del proveedor en Drive.</div>
-            </div>
-            <div style="display:flex; gap:8px;">
-              <button class="btn btn-outline" onclick="descargarPdfEvidencia('buzon')" style="padding:6px 12px; font-size:12px;">📥 Descargar PDF Buzón</button>
-              <button class="btn btn-primary" onclick="imprimirPdfEvidencia('buzon')" style="padding:6px 12px; font-size:12px;">🖨️ Imprimir</button>
-            </div>
-          </div>
-          <div style="max-height:380px; overflow-y:auto; text-align:center; border:1px solid #e2e8f0; border-radius:8px; background:#fff; padding:6px;">
-            <img id="buzon-screenshot" src="" alt="Captura Buzón" style="max-width:100%; height:auto; border-radius:6px;" />
-          </div>
+        <!-- Aviso de envío al Buzón -->
+        <div id="buzon-result" style="display:none; background:#eff6ff; border:1px solid #93c5fd; border-radius:12px; padding:12px 16px; margin-bottom:16px;">
+          <div style="font-weight:800; color:#1e40af; font-size:13.5px;" id="buzon-result-title">✅ Factura Enviada al Buzón Autotec</div>
+          <div style="font-size:12.5px; color:#1e3a8a; margin-top:3px;" id="buzon-result-sub">Esperando correo de confirmación en la bandeja de abajo...</div>
+          <img id="buzon-screenshot" src="" alt="" style="display:none;" />
         </div>
 
-        <!-- Resultado Correo de Confirmación -->
-        <div id="buzon-mail-result" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:14px; margin-bottom:16px;">
+        <!-- Resultado PDF del Correo de Confirmación (El único comprobante necesario para Nube 1) -->
+        <div id="buzon-mail-result" style="display:none; background:#f0fdf4; border:2px solid #22c55e; border-radius:12px; padding:14px; margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
             <div>
-              <div style="font-weight:800; color:#15803d; font-size:14px;" id="buzon-mail-title">✅ Correo de Confirmación Capturado</div>
+              <div style="font-weight:800; color:#15803d; font-size:14px;" id="buzon-mail-title">✅ Comprobante de Correo Nube 1 Listo en PDF (Para Unir al Expediente)</div>
               <div style="font-size:12px; color:#166534;" id="buzon-mail-sub">Factura electrónica registrada — notifica@gfarrera.com.mx</div>
             </div>
             <div style="display:flex; gap:8px;">
-              <button class="btn btn-outline" onclick="descargarPdfEvidencia('correoBuzon')" style="padding:6px 12px; font-size:12px; border-color:#16a34a; color:#15803d;">📥 Descargar PDF Correo</button>
-              <button class="btn btn-primary" onclick="imprimirPdfEvidencia('correoBuzon')" style="padding:6px 12px; font-size:12px; background:#16a34a; border-color:#16a34a;">🖨️ Imprimir Correo</button>
+              <button class="btn btn-outline" onclick="descargarPdfEvidencia('correoBuzon')" style="padding:6px 12px; font-size:12px; border-color:#16a34a; color:#15803d; font-weight:700;">📥 Descargar PDF Correo</button>
+              <button class="btn btn-primary" onclick="imprimirPdfEvidencia('correoBuzon')" style="padding:6px 12px; font-size:12px; background:#16a34a; border-color:#16a34a; font-weight:700;">🖨️ Imprimir Correo</button>
             </div>
           </div>
           <div style="max-height:380px; overflow-y:auto; text-align:center; border:1px solid #dcfce7; border-radius:8px; background:#fff; padding:6px;">
             <img id="buzon-mail-screenshot" src="" alt="Captura Correo Confirmación" style="max-width:100%; height:auto; border-radius:6px;" />
+          </div>
+        </div>
+
+        <!-- 📬 BANDEJA EN VIVO DE CONFIRMACIONES (notifica@gfarrera.com.mx -> toyotachiapas30@gmail.com) -->
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:14px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+            <div>
+              <div style="font-size:13.5px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:6px;">
+                <span>📥 Bandeja en Vivo de Comprobantes Nube 1 (notifica@gfarrera.com.mx)</span>
+                <span id="nube1-inbox-badge" style="font-size:11px; padding:2px 8px; border-radius:999px; background:#e0f2fe; color:#0369a1; font-weight:700;">toyotachiapas30@gmail.com</span>
+              </div>
+              <div style="font-size:11.5px; color:#64748b; margin-top:2px;">
+                Aquí aparecen al instante los correos de <strong>"Factura electrónica registrada"</strong> que llegan a <code>toyotachiapas30@gmail.com</code>. Haz clic en <strong>"📄 Usar este Comprobante"</strong> para convertirlo en PDF y agregarlo al expediente.
+              </div>
+            </div>
+          </div>
+          <div id="nube1-bandeja-list" style="display:flex; flex-direction:column; gap:8px; max-height:290px; overflow-y:auto;">
+            <div style="text-align:center; padding:18px; color:#64748b; font-size:12.5px;">
+              ⏳ Cargando correos de confirmación de Grupo Farrera...
+            </div>
           </div>
         </div>
 
@@ -739,7 +763,30 @@
         <div class="alert err" id="err-step6"><span>⚠️</span><span id="err-step6-msg"></span></div>
 
         <div class="btn-row">
-          <button class="btn btn-primary" id="btn-sheets-fill" style="display:none" onclick="llenarSheet()"><span class="spin" id="spin-sheets" style="display:none"></span>📊 Llenar Hoja, Subir PDF a Drive e Imprimir</button>
+          <button class="btn btn-primary" id="btn-sheets-fill" style="display:none" onclick="llenarSheet()"><span class="spin" id="spin-sheets" style="display:none"></span>📊 Llenar Hoja, Subir PDF a Drive y Unir Expediente</button>
+        </div>
+
+        <!-- 📦 EXPEDIENTE COMPLETO UNIDO EN 1 SOLO ARCHIVO PDF -->
+        <div id="expediente-unido-card" style="margin-top:22px; background:linear-gradient(135deg, #f0fdf4 0%, #eff6ff 100%); border:2px solid #16a34a; border-radius:14px; padding:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+            <div>
+              <div style="font-size:15px; font-weight:800; color:#0f172a; display:flex; align-items:center; gap:8px;">
+                <span>📦 Expediente Completo Unido (1 Solo PDF Listo para Imprimir/Enviar)</span>
+              </div>
+              <div style="font-size:12.5px; color:#475569; margin-top:3px;" id="expediente-unido-status">
+                Une automáticamente: <strong>1) Contrarecibo</strong> + <strong>2) Factura PDF</strong> + <strong>3) Validación SAT</strong> + <strong>4) Banxico FIX (si aplica)</strong> + <strong>5) Correo Nube 1</strong> + <strong>6) Comprobante Nube 2</strong>.
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-primary" id="btn-merge-expediente" onclick="unirYDescargarExpedienteCompleto(false)" style="background:#16a34a; border-color:#16a34a; font-weight:700; padding:9px 15px; font-size:13px;">
+                📥 Unir y Descargar Expediente (1 PDF)
+              </button>
+              <button class="btn btn-outline" id="btn-print-expediente" onclick="unirYDescargarExpedienteCompleto(true)" style="border-color:#15803d; color:#15803d; background:#fff; font-weight:700; padding:9px 15px; font-size:13px;">
+                🖨️ Unir e Imprimir Todo
+              </button>
+            </div>
+          </div>
+          <div id="expediente-parts-checklist" style="display:flex; flex-wrap:wrap; gap:8px; font-size:11.5px;"></div>
         </div>
 
         <!-- Final success -->
@@ -1059,6 +1106,7 @@
 <!-- ══ Scripts ══════════════════ -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="app.js?v=v10"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="app.js?v=v11"></script>
 </body>
 </html>

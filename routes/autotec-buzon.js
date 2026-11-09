@@ -14,15 +14,18 @@ const getUpload = () => {
   return multer({ storage: multer.memoryStorage() });
 };
 
-// Datos oficiales del usuario según Memoria de Flujo Toyota Chiapas
+// Datos oficiales del usuario — Ahora usando toyotachiapas30@gmail.com para recibir en la Bandeja en vivo
 const DEFAULT_BUZON_NOMBRE   = 'YONI JAVIER RUIZ DOMINGUEZ';
 const DEFAULT_BUZON_TELEFONO = '8718645133';
-const DEFAULT_BUZON_CORREO   = 'chiapastoyota@gmail.com';
+const DEFAULT_BUZON_CORREO   = 'toyotachiapas30@gmail.com';
 const URL_BUZON = 'https://autotec.farrera.net:60002/buzonfecg.aspx';
+const BRIDGE_SECRET = process.env.BRIDGE_SECRET || 'toyoter_bridge_2026';
 const farreraHttpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-// Trabajos asíncronos para evitar el timeout de 30s del proxy de Vercel
 const buzonJobs = new Map();
+const pendingBridgeJobs = [];
+let lastBridgeHeartbeat = 0;
+let lastBridgeHost = '';
 
 function extractHiddenValue(html, fieldName) {
   const escaped = fieldName.replace(/\$/g, '\\$');
@@ -64,6 +67,64 @@ function mergeCookies(oldCookieStr, setCookieHeader) {
   return Array.from(map.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
+// ── Estado y Endpoints del Puente 24/7 (Windows / Mac en México) ─────────────
+router.get('/bridge/status', (req, res) => {
+  const online = (Date.now() - lastBridgeHeartbeat) < 25000;
+  res.json({
+    ok: true,
+    online,
+    lastSeen: lastBridgeHeartbeat,
+    hostname: lastBridgeHost || null
+  });
+});
+
+router.get('/bridge/next', (req, res) => {
+  lastBridgeHeartbeat = Date.now();
+  if (req.query.host) lastBridgeHost = String(req.query.host);
+
+  while (pendingBridgeJobs.length > 0) {
+    const nextJob = pendingBridgeJobs.shift();
+    if (buzonJobs.has(nextJob.jobId)) {
+      const j = buzonJobs.get(nextJob.jobId);
+      j.step = `⏳ 2/4 Puente 24/7 (${lastBridgeHost || 'Local'}) enviando XML y PDF a Grupo Farrera...`;
+      return res.json({ ok: true, hasJob: true, job: nextJob });
+    }
+  }
+  return res.json({ ok: true, hasJob: false });
+});
+
+router.post('/bridge/complete/:jobId', async (req, res) => {
+  lastBridgeHeartbeat = Date.now();
+  const { jobId } = req.params;
+  const job = buzonJobs.get(jobId);
+  if (!job) return res.json({ ok: false, error: 'Job ya no existe' });
+
+  const body = req.body || {};
+  if (!body.ok) {
+    buzonJobs.set(jobId, { status: 'error', error: body.error || 'Error en Puente 24/7 al conectar con Buzón Farrera.' });
+    return res.json({ ok: true });
+  }
+
+  buzonJobs.set(jobId, {
+    status: 'done',
+    step: '✅ Enviado por Puente 24/7',
+    result: {
+      ok: true,
+      pdfSubido: body.pdfSubido,
+      enviadoFinal: body.enviadoFinal,
+      aviso: body.aviso || '',
+      mensajePortal: body.mensajePortal || '',
+      registradaExito: Boolean(body.registradaExito),
+      datosUsados: body.datosUsados || {},
+      screenshot: body.screenshot || null,
+      pdfBase64: body.pdfBase64 || null,
+      mensaje: body.mensaje || 'Factura validada y enviada al Buzón Autotec vía Puente 24/7. El comprobante llegará en segundos a la Bandeja de Confirmaciones abajo.'
+    }
+  });
+  setTimeout(() => buzonJobs.delete(jobId), 60000);
+  return res.json({ ok: true });
+});
+
 async function runBuzonJob(jobId, params) {
   const { xmlPath, pdfPath, xmlOriginalName, pdfOriginalName, nombre, telefono, correo, ordenCompra, soloValidar } = params;
   const setStep = (step) => {
@@ -71,22 +132,53 @@ async function runBuzonJob(jobId, params) {
     if (j) j.step = step;
   };
 
+  // Si el Puente 24/7 (Windows/Mac en México) está activo, delegarle el envío para saltar el firewall de Farrera (:60002)
+  const isBridgeOnline = (Date.now() - lastBridgeHeartbeat) < 25000;
+  if (isBridgeOnline) {
+    setStep(`⏳ 1/4 Enviando tarea al Puente 24/7 (${lastBridgeHost || 'México'})...`);
+    const xmlBase64 = fs.readFileSync(xmlPath).toString('base64');
+    const pdfBase64 = pdfPath && fs.existsSync(pdfPath) ? fs.readFileSync(pdfPath).toString('base64') : null;
+    try { fs.unlinkSync(xmlPath); } catch (e) {}
+    if (pdfPath) { try { fs.unlinkSync(pdfPath); } catch (e) {} }
+
+    pendingBridgeJobs.push({
+      jobId,
+      xmlBase64,
+      pdfBase64,
+      xmlOriginalName: xmlOriginalName || 'factura.xml',
+      pdfOriginalName: pdfOriginalName || 'factura.pdf',
+      nombre,
+      telefono,
+      correo,
+      ordenCompra,
+      soloValidar
+    });
+
+    // Esperar a que el Puente 24/7 complete el trabajo (hasta 90s)
+    for (let i = 0; i < 90; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const st = buzonJobs.get(jobId);
+      if (!st) break;
+      if (st.status === 'done') return st.result;
+      if (st.status === 'error') throw new Error(st.error);
+    }
+    throw new Error('Tiempo agotado esperando respuesta del Puente 24/7.');
+  }
+
   let browser = null;
   try {
-    // 1. Abrir sesión HTTP con buzonfecg.aspx
     setStep('⏳ 1/4 Conectando con portal buzonfecg.aspx de Grupo Farrera...');
     const initResp = await axios.get(URL_BUZON, {
       httpsAgent: farreraHttpsAgent,
-      timeout: 30000,
+      timeout: 25000,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
       }
     });
 
     let cookies = mergeCookies('', initResp.headers['set-cookie']);
     const initHtml = initResp.data || '';
 
-    // 2. Enviar PostBack de "Validar" con el archivo XML
     setStep('⏳ 2/4 Subiendo y validando XML en servidor Farrera...');
     const fdValida = new FormData();
     fdValida.append('ctl00_ToolkitScriptManager1_HiddenField', '');
@@ -117,8 +209,7 @@ async function runBuzonJob(jobId, params) {
         ...fdValida.getHeaders(),
         Cookie: cookies,
         Origin: 'https://autotec.farrera.net:60002',
-        Referer: URL_BUZON,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        Referer: URL_BUZON
       }
     });
 
@@ -127,7 +218,6 @@ async function runBuzonJob(jobId, params) {
     const msgTrasValidar = extractSpanText(currentHtml, 'ctl00_ContentPlaceHolder1_lblMensaje');
     const avisoTrasValidar = extractSpanText(currentHtml, 'ctl00_ContentPlaceHolder1_lblAviso') || extractAlertFromScript(currentHtml);
 
-    // 3. Si el XML fue validado y apareció btnEnviar, adjuntar el PDF y enviar
     let pdfSubido = false;
     let enviadoFinal = false;
     const tieneBtnEnviar = /id="ctl00_ContentPlaceHolder1_btnEnviar"/i.test(currentHtml);
@@ -159,8 +249,7 @@ async function runBuzonJob(jobId, params) {
           ...fdEnviar.getHeaders(),
           Cookie: cookies,
           Origin: 'https://autotec.farrera.net:60002',
-          Referer: URL_BUZON,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+          Referer: URL_BUZON
         }
       });
 
@@ -173,47 +262,8 @@ async function runBuzonJob(jobId, params) {
     const msgFinal = extractSpanText(currentHtml, 'ctl00_ContentPlaceHolder1_lblMensaje') || msgTrasValidar;
     const registradaExito = /registrad[ao]|correctamente|éxito|exito|recibid[ao]|enviad[ao]/i.test(`${avisoFinal} ${msgFinal}`);
 
-    // 4. Renderizar el HTML oficial devuelto por buzonfecg.aspx para generar la captura real y el PDF
-    setStep('⏳ 4/4 Generando captura real y PDF del Buzón Autotec...');
-    let renderHtml = currentHtml
-      .replace(/<head>/i, '<head><base href="https://autotec.farrera.net:60002/">')
-      .replace(/http:\/\/ajax\.googleapis\.com/gi, 'https://ajax.googleapis.com')
-      .replace(/<script[\s\S]*?<\/script>/gi, '');
-
-    browser = await launchBrowser();
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 920 });
-    await page.setContent(renderHtml, { waitUntil: 'load', timeout: 15000 }).catch(() => {});
-
-    // Asegurar que los datos capturados y el aviso del servidor sean visibles en la captura
-    await page.evaluate((datos) => {
-      const setIfEmpty = (id, val) => {
-        const el = document.getElementById(id);
-        if (el && !el.value && val) el.value = val;
-      };
-      setIfEmpty('ctl00_ContentPlaceHolder1_txtNombre', datos.nombre);
-      setIfEmpty('ctl00_ContentPlaceHolder1_txtTelefono', datos.telefono);
-      setIfEmpty('ctl00_ContentPlaceHolder1_txtMail', datos.correo);
-      if (datos.ordenCompra) setIfEmpty('ctl00_ContentPlaceHolder1_txtOrdenCompra', datos.ordenCompra);
-
-      const msgEl = document.getElementById('ctl00_ContentPlaceHolder1_lblMensaje');
-      if (msgEl && !msgEl.innerText.trim() && (datos.avisoFinal || datos.msgFinal)) {
-        msgEl.innerHTML = `<font color="Blue"><b>${datos.avisoFinal || datos.msgFinal}</b></font>`;
-      }
-    }, { nombre, telefono, correo, ordenCompra, avisoFinal, msgFinal });
-
-    await new Promise((r) => setTimeout(r, 400));
-
-    const screenshotB64 = await page.screenshot({ fullPage: true, encoding: 'base64' });
-    const pdfBuf = await page.pdf({
-      format: 'Letter',
-      printBackground: true,
-      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' }
-    });
-
     try { fs.unlinkSync(xmlPath); } catch (e) {}
     if (pdfPath) { try { fs.unlinkSync(pdfPath); } catch (e) {} }
-    await browser.close().catch(() => {});
 
     const result = {
       ok: true,
@@ -223,11 +273,11 @@ async function runBuzonJob(jobId, params) {
       mensajePortal: msgFinal,
       registradaExito,
       datosUsados: { nombre, telefono, correo, ordenCompra },
-      screenshot: `data:image/png;base64,${screenshotB64}`,
-      pdfBase64: Buffer.from(pdfBuf).toString('base64'),
+      screenshot: null,
+      pdfBase64: null,
       mensaje: enviadoFinal
-        ? 'Factura validada y enviada en el Buzón de Autotec (Nube 1).'
-        : 'Respuesta del Buzón de Autotec (Nube 1).'
+        ? 'Factura validada y enviada en el Buzón de Autotec (Nube 1). Revisa la Bandeja de Confirmaciones abajo.'
+        : 'Respuesta recibida del Buzón de Autotec (Nube 1).'
     };
 
     buzonJobs.set(jobId, { status: 'done', step: '✅ Completado', result });
@@ -315,55 +365,128 @@ router.get('/buzon-status/:jobId', (req, res) => {
   return res.json({ ok: true, ...job });
 });
 
+// ── GET /api/autotec/bandeja-confirmaciones ─────────────
+// Devuelve la lista en vivo de correos de confirmación ("Factura electrónica registrada" / notifica@gfarrera.com.mx)
+// recibidos en toyotachiapas30@gmail.com para mostrarlos como Bandeja dentro del Paso 4.
+router.get('/bandeja-confirmaciones', async (req, res) => {
+  const client = getAuthorizedClient();
+  if (!client) {
+    return res.status(401).json({ ok: false, error: 'Gmail no está conectado.' });
+  }
+
+  try {
+    const gmail = getGoogle().gmail({ version: 'v1', auth: client });
+    const q = 'from:notifica@gfarrera.com.mx OR "Factura electrónica registrada"';
+    const listRes = await gmail.users.messages.list({ userId: 'me', q, maxResults: 12 });
+    const msgs = listRes.data.messages || [];
+
+    const items = await Promise.all(
+      msgs.map(async (m) => {
+        try {
+          const full = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'full' });
+          const headers = full.data.payload?.headers || [];
+          const getH = (n) => headers.find((h) => h.name.toLowerCase() === n.toLowerCase())?.value || '';
+          let bodyHtml = '';
+          const extractParts = (payload) => {
+            if (!payload) return;
+            if (payload.mimeType === 'text/html' && payload.body?.data) {
+              bodyHtml += Buffer.from(payload.body.data, 'base64').toString('utf8');
+            } else if (payload.mimeType === 'text/plain' && payload.body?.data && !bodyHtml) {
+              bodyHtml += `<pre style="font-family:sans-serif;white-space:pre-wrap;">${Buffer.from(payload.body.data, 'base64').toString('utf8')}</pre>`;
+            }
+            if (Array.isArray(payload.parts)) payload.parts.forEach(extractParts);
+          };
+          extractParts(full.data.payload);
+
+          return {
+            id: m.id,
+            subject: getH('Subject') || 'Factura electrónica registrada',
+            from: getH('From') || 'notifica@gfarrera.com.mx',
+            to: getH('To') || 'toyotachiapas30@gmail.com',
+            date: getH('Date') || '',
+            internalDate: Number(full.data.internalDate || 0),
+            snippet: full.data.snippet || '',
+            bodyText: stripHtmlTags(bodyHtml || full.data.snippet || '')
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+
+    const validItems = items.filter(Boolean).sort((a, b) => b.internalDate - a.internalDate);
+    return res.json({ ok: true, items: validItems });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── POST /api/autotec/correo-confirmacion ─────────────────────────────
-async function runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client }) {
+async function runCorreoConfirmacionJob(jobId, { messageId, folio, uuid, rfcEmisor, client }) {
   let browser = null;
   try {
-    buzonJobs.set(jobId, { status: 'running', step: '⏳ 1/2 Buscando correo de notifica@gfarrera.com.mx en Gmail...' });
+    buzonJobs.set(jobId, { status: 'running', step: '⏳ 1/2 Leyendo correo de confirmación en toyotachiapas30@gmail.com...' });
     const gmail = getGoogle().gmail({ version: 'v1', auth: client });
 
-    const queries = [];
-    if (folio && folio !== '—') queries.push(`(from:notifica@gfarrera.com.mx OR "Factura electrónica registrada") "${folio}"`);
-    if (uuid && uuid !== '—') queries.push(`(from:notifica@gfarrera.com.mx OR "Factura electrónica registrada") "${uuid.slice(0, 8)}"`);
-    queries.push(`from:notifica@gfarrera.com.mx "Factura electrónica registrada"`);
-
     let matchedMsg = null;
-    for (const q of queries) {
-      const listRes = await gmail.users.messages.list({ userId: 'me', q, maxResults: 8 });
-      const msgs = listRes.data.messages || [];
-      for (const m of msgs) {
-        const full = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'full' });
-        const snippet = full.data.snippet || '';
-        let bodyHtml = '';
-        const extractParts = (payload) => {
-          if (!payload) return;
-          if (payload.mimeType === 'text/html' && payload.body?.data) {
-            bodyHtml += Buffer.from(payload.body.data, 'base64').toString('utf8');
-          } else if (payload.mimeType === 'text/plain' && payload.body?.data && !bodyHtml) {
-            bodyHtml += `<pre style="font-family:sans-serif;white-space:pre-wrap;">${Buffer.from(payload.body.data, 'base64').toString('utf8')}</pre>`;
-          }
-          if (Array.isArray(payload.parts)) payload.parts.forEach(extractParts);
-        };
-        extractParts(full.data.payload);
 
-        const combined = `${snippet} ${bodyHtml}`.toLowerCase();
-        const matchesFolio = folio && folio !== '—' && combined.includes(String(folio).toLowerCase());
-        const matchesUuid = uuid && uuid !== '—' && combined.includes(String(uuid).slice(0, 8).toLowerCase());
-        const matchesRfc = rfcEmisor && rfcEmisor !== '—' && combined.includes(String(rfcEmisor).toLowerCase());
-
-        if (matchesFolio || matchesUuid || matchesRfc || (!folio && !uuid)) {
-          matchedMsg = { full: full.data, bodyHtml: bodyHtml || `<p>${snippet}</p>` };
-          break;
+    if (messageId) {
+      const full = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
+      let bodyHtml = '';
+      const extractParts = (payload) => {
+        if (!payload) return;
+        if (payload.mimeType === 'text/html' && payload.body?.data) {
+          bodyHtml += Buffer.from(payload.body.data, 'base64').toString('utf8');
+        } else if (payload.mimeType === 'text/plain' && payload.body?.data && !bodyHtml) {
+          bodyHtml += `<pre style="font-family:sans-serif;white-space:pre-wrap;">${Buffer.from(payload.body.data, 'base64').toString('utf8')}</pre>`;
         }
+        if (Array.isArray(payload.parts)) payload.parts.forEach(extractParts);
+      };
+      extractParts(full.data.payload);
+      matchedMsg = { full: full.data, bodyHtml: bodyHtml || `<p>${full.data.snippet || ''}</p>` };
+    } else {
+      const queries = [];
+      if (folio && folio !== '—') queries.push(`(from:notifica@gfarrera.com.mx OR "Factura electrónica registrada") "${folio}"`);
+      if (uuid && uuid !== '—') queries.push(`(from:notifica@gfarrera.com.mx OR "Factura electrónica registrada") "${uuid.slice(0, 8)}"`);
+      queries.push(`from:notifica@gfarrera.com.mx "Factura electrónica registrada"`);
+
+      for (const q of queries) {
+        const listRes = await gmail.users.messages.list({ userId: 'me', q, maxResults: 8 });
+        const msgs = listRes.data.messages || [];
+        for (const m of msgs) {
+          const full = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'full' });
+          const snippet = full.data.snippet || '';
+          let bodyHtml = '';
+          const extractParts = (payload) => {
+            if (!payload) return;
+            if (payload.mimeType === 'text/html' && payload.body?.data) {
+              bodyHtml += Buffer.from(payload.body.data, 'base64').toString('utf8');
+            } else if (payload.mimeType === 'text/plain' && payload.body?.data && !bodyHtml) {
+              bodyHtml += `<pre style="font-family:sans-serif;white-space:pre-wrap;">${Buffer.from(payload.body.data, 'base64').toString('utf8')}</pre>`;
+            }
+            if (Array.isArray(payload.parts)) payload.parts.forEach(extractParts);
+          };
+          extractParts(full.data.payload);
+
+          const combined = `${snippet} ${bodyHtml}`.toLowerCase();
+          const matchesFolio = folio && folio !== '—' && combined.includes(String(folio).toLowerCase());
+          const matchesUuid = uuid && uuid !== '—' && combined.includes(String(uuid).slice(0, 8).toLowerCase());
+          const matchesRfc = rfcEmisor && rfcEmisor !== '—' && combined.includes(String(rfcEmisor).toLowerCase());
+
+          if (matchesFolio || matchesUuid || matchesRfc || (!folio && !uuid)) {
+            matchedMsg = { full: full.data, bodyHtml: bodyHtml || `<p>${snippet}</p>` };
+            break;
+          }
+        }
+        if (matchedMsg) break;
       }
-      if (matchedMsg) break;
     }
 
     if (!matchedMsg) {
       const notFoundRes = {
         ok: false,
         notFound: true,
-        error: `Aún no aparece el correo de confirmación de notifica@gfarrera.com.mx para el folio ${folio || uuid || ''} en la bandeja conectada (toyotachiapas30@gmail.com). Si ya enviaste en el Buzón con toyotachiapas30@gmail.com, espera ~30 segundos y vuelve a dar clic.`
+        error: `Aún no aparece el correo de confirmación de notifica@gfarrera.com.mx para el folio ${folio || uuid || ''} en toyotachiapas30@gmail.com. En cuanto llegue aparecerá en la Bandeja aquí abajo.`
       };
       buzonJobs.set(jobId, { status: 'done', result: notFoundRes });
       return notFoundRes;
@@ -404,11 +527,11 @@ async function runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client 
 </body>
 </html>`;
 
-    buzonJobs.set(jobId, { status: 'running', step: '⏳ 2/2 Generando captura real y PDF del correo...' });
+    buzonJobs.set(jobId, { status: 'running', step: '⏳ 2/2 Generando PDF oficial de confirmación...' });
     browser = await launchBrowser();
     const page = await browser.newPage();
     await page.setViewport({ width: 1024, height: 900 });
-    await page.setContent(gmailPrintHtml, { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.setContent(gmailPrintHtml, { waitUntil: 'load', timeout: 12000 });
 
     const screenshotB64 = await page.screenshot({ fullPage: true, encoding: 'base64' });
     const pdfBuf = await page.pdf({
@@ -437,7 +560,7 @@ async function runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client 
 }
 
 router.post('/correo-confirmacion', async (req, res) => {
-  const { folio, uuid, rfcEmisor, asyncJob } = req.body || {};
+  const { messageId, folio, uuid, rfcEmisor, asyncJob } = req.body || {};
   const client = getAuthorizedClient();
   if (!client) {
     return res.status(401).json({ ok: false, error: 'Gmail no está conectado.' });
@@ -447,12 +570,12 @@ router.post('/correo-confirmacion', async (req, res) => {
   buzonJobs.set(jobId, { status: 'running', step: '⏳ Buscando correo en Gmail...' });
 
   if (asyncJob === 'true' || asyncJob === true) {
-    runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client }).catch(() => {});
+    runCorreoConfirmacionJob(jobId, { messageId, folio, uuid, rfcEmisor, client }).catch(() => {});
     return res.json({ ok: true, asyncJob: true, jobId });
   }
 
   try {
-    const result = await runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client });
+    const result = await runCorreoConfirmacionJob(jobId, { messageId, folio, uuid, rfcEmisor, client });
     return res.json(result);
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });

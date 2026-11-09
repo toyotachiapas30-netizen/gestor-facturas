@@ -199,12 +199,18 @@ function goTo(n) {
   });
 
   // Special behavior
+  if (n === 3) {
+    // Paso 4: Nube 1 (Buzón Autotec + Bandeja en Vivo de Confirmaciones)
+    if (typeof checkBridgeStatus === 'function') checkBridgeStatus();
+    if (typeof cargarBandejaConfirmacionesNube1 === 'function') cargarBandejaConfirmacionesNube1(false);
+  }
   if (n === 4) {
     // Paso 5: Nube 2 (EnvioFacturasGastos)
     if (typeof checkPortalConfig === 'function') checkPortalConfig();
   }
   if (n === 5) {
-    // Paso 6: Contrarecibo Google Sheets
+    // Paso 6: Contrarecibo Google Sheets + Unir Expediente Completo
+    if (typeof renderChecklistExpediente === 'function') renderChecklistExpediente();
     const sucSel = document.getElementById('inp-sucursal');
     const sucName = sucSel ? sucSel.options[sucSel.selectedIndex].text : 'Toyota Chiapas';
     const indicator = document.getElementById('active-branch-name');
@@ -823,7 +829,85 @@ async function subirDrive() {
   }
 }
 
-// ── PASO 4: Nube 1 — Buzón Autotec (buzonfecg.aspx) + Correo de Confirmación ─
+// ── PASO 4: Nube 1 — Buzón Autotec (buzonfecg.aspx) + Bandeja en Vivo de Confirmación ─
+async function checkBridgeStatus() {
+  const pill = document.getElementById('bridge-status-pill');
+  if (!pill) return;
+  try {
+    const r = await fetch('/api/autotec/bridge/status');
+    const data = await r.json();
+    if (data.ok && data.online) {
+      pill.textContent = `🟢 Puente 24/7 Conectado (${data.hostname || 'México'})`;
+      pill.style.background = '#dcfce7';
+      pill.style.color = '#166534';
+    } else {
+      pill.textContent = '🟡 Puente 24/7 en espera (iniciando...)';
+      pill.style.background = '#fef3c7';
+      pill.style.color = '#92400e';
+    }
+  } catch (e) {}
+}
+
+async function cargarBandejaConfirmacionesNube1(manual = false) {
+  const listEl = document.getElementById('nube1-bandeja-list');
+  if (!listEl) return [];
+  if (manual) {
+    listEl.innerHTML = `<div style="text-align:center; padding:18px; color:#0284c7; font-size:12.5px; font-weight:700;">🔄 Buscando correos recientes de notifica@gfarrera.com.mx en toyotachiapas30@gmail.com...</div>`;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      folio: state.cfdi?.noFactura || '',
+      uuid: state.cfdi?.uuid || '',
+      rfcEmisor: state.cfdi?.rfcEmisor || '',
+      nombreEmisor: state.cfdi?.nombreEmisor || ''
+    });
+    const r = await fetch(`/api/autotec/bandeja-confirmaciones?${params.toString()}`);
+    const data = await r.json();
+    if (!data.ok) {
+      listEl.innerHTML = `<div style="text-align:center; padding:16px; color:#dc2626; font-size:12.5px;">⚠️ ${data.error || 'No se pudo consultar la bandeja.'}</div>`;
+      return [];
+    }
+
+    const emails = data.emails || [];
+    if (emails.length === 0) {
+      listEl.innerHTML = `<div style="text-align:center; padding:18px; color:#64748b; font-size:12.5px;">📭 Aún no hay correos de <code>notifica@gfarrera.com.mx</code> en <strong>toyotachiapas30@gmail.com</strong>. Cuando envíes una factura al Buzón con el correo <code>toyotachiapas30@gmail.com</code>, aparecerá aquí en segundos.</div>`;
+      return [];
+    }
+
+    listEl.innerHTML = emails.map(m => {
+      const borderCol = m.matched ? '#16a34a' : '#e2e8f0';
+      const bgCol = m.matched ? '#f0fdf4' : '#ffffff';
+      const badgeHtml = m.matched
+        ? `<span style="font-size:10.5px; padding:2px 8px; border-radius:999px; background:#16a34a; color:#fff; font-weight:800;">🎯 Coincide con esta factura</span>`
+        : `<span style="font-size:10.5px; padding:2px 8px; border-radius:999px; background:#e2e8f0; color:#475569; font-weight:700;">Recibido</span>`;
+
+      return `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 14px; background:${bgCol}; border:1.5px solid ${borderCol}; border-radius:10px;">
+          <div style="flex:1; min-width:220px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <strong style="font-size:13px; color:#0f172a;">📧 ${m.subject || 'Factura electrónica registrada'}</strong>
+              ${badgeHtml}
+            </div>
+            <div style="font-size:11.5px; color:#475569; margin-top:3px;">${m.snippet || ''}</div>
+            <div style="font-size:11px; color:#64748b; margin-top:2px;">🕒 ${m.date || ''} · De: ${m.from || 'notifica@gfarrera.com.mx'}</div>
+          </div>
+          <div>
+            <button class="btn btn-primary" onclick="capturarCorreoConfirmacionBuzon('${m.id}')" style="background:#16a34a; border-color:#16a34a; padding:7px 12px; font-size:12px; font-weight:700; white-space:nowrap;">
+              📄 Usar este Comprobante (Generar PDF)
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return emails;
+  } catch (err) {
+    listEl.innerHTML = `<div style="text-align:center; padding:16px; color:#dc2626; font-size:12.5px;">⚠️ Error al consultar bandeja: ${err.message}</div>`;
+    return [];
+  }
+}
+
 async function subirBuzon(soloValidar = false) {
   hideErr('err-step3');
   if (!state.xmlFile) return showErr('err-step3', 'Carga primero el archivo XML en el Paso 1.');
@@ -837,7 +921,7 @@ async function subirBuzon(soloValidar = false) {
 
   const nombre = document.getElementById('inp-buzon-nombre')?.value?.trim() || 'YONI JAVIER RUIZ DOMINGUEZ';
   const telefono = document.getElementById('inp-buzon-telefono')?.value?.trim() || '8718645133';
-  const correo = document.getElementById('inp-buzon-correo')?.value?.trim() || 'chiapastoyota@gmail.com';
+  const correo = document.getElementById('inp-buzon-correo')?.value?.trim() || 'toyotachiapas30@gmail.com';
   const ordenCompra = document.getElementById('inp-orden-compra')?.value?.trim() || '';
 
   fd.append('nombre', nombre);
@@ -861,7 +945,7 @@ async function subirBuzon(soloValidar = false) {
     let data = startData;
     if (startData.asyncJob && startData.jobId) {
       for (let i = 0; i < 65; i++) {
-        await new Promise(res => setTimeout(res, 2500));
+        await new Promise(res => setTimeout(res, 2000));
         const stRes = await fetch(`/api/autotec/buzon-status/${startData.jobId}`);
         const stText = await stRes.text();
         let stData;
@@ -883,21 +967,30 @@ async function subirBuzon(soloValidar = false) {
     if (!data || !data.ok) return showErr('err-step3', data?.error || 'Tiempo de espera agotado en Buzón Autotec.');
 
     document.getElementById('buzon-result').style.display='block';
-    if (data.screenshot) document.getElementById('buzon-screenshot').src=data.screenshot;
     const subEl = document.getElementById('buzon-result-sub');
     if (subEl) {
       subEl.textContent = [data.mensaje, data.aviso, data.mensajePortal].filter(Boolean).join(' · ');
     }
 
-    if (data.pdfBase64) {
-      const blob = b64ToBlob(data.pdfBase64, 'application/pdf');
-      const fileName = `Buzon_Autotec_Nube1_${getFolioSafe()}.pdf`;
-      state.evidencias.buzon = { blob, fileName };
-      subirPdfEvidenciaADrive(blob, fileName);
-    }
-
     state.buzonOk=true;
     buscarSheetPorNombre();
+
+    // Actualizar automáticamente la Bandeja en Vivo y capturar el correo de confirmación apenas llegue
+    setTimeout(async () => {
+      const emails = await cargarBandejaConfirmacionesNube1(true);
+      const match = emails.find(e => e.matched);
+      if (match && !state.evidencias?.correoBuzon) {
+        capturarCorreoConfirmacionBuzon(match.id);
+      } else {
+        setTimeout(async () => {
+          const emails2 = await cargarBandejaConfirmacionesNube1(false);
+          const match2 = emails2.find(e => e.matched);
+          if (match2 && !state.evidencias?.correoBuzon) {
+            capturarCorreoConfirmacionBuzon(match2.id);
+          }
+        }, 5000);
+      }
+    }, 3500);
   } catch(err) {
     showErr('err-step3','Error en Buzón Autotec: '+err.message);
   } finally {
@@ -906,7 +999,7 @@ async function subirBuzon(soloValidar = false) {
   }
 }
 
-async function capturarCorreoConfirmacionBuzon() {
+async function capturarCorreoConfirmacionBuzon(specificMessageId = '') {
   hideErr('err-step3');
   const btn = document.getElementById('btn-buzon-correo');
   const origHtml = btn ? btn.innerHTML : '';
@@ -917,6 +1010,7 @@ async function capturarCorreoConfirmacionBuzon() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        messageId: specificMessageId || '',
         folio: state.cfdi?.noFactura || '',
         uuid: state.cfdi?.uuid || '',
         rfcEmisor: state.cfdi?.rfcEmisor || '',
@@ -938,7 +1032,7 @@ async function capturarCorreoConfirmacionBuzon() {
     let data = startData;
     if (startData.asyncJob && startData.jobId) {
       for (let i = 0; i < 40; i++) {
-        await new Promise(res => setTimeout(res, 2500));
+        await new Promise(res => setTimeout(res, 2000));
         const stRes = await fetch(`/api/autotec/buzon-status/${startData.jobId}`);
         const stText = await stRes.text();
         let stData;
@@ -966,16 +1060,17 @@ async function capturarCorreoConfirmacionBuzon() {
     const sub = document.getElementById('buzon-mail-sub');
     if (box) box.style.display = 'block';
     if (img && data.screenshot) img.src = data.screenshot;
-    if (sub) sub.textContent = `${data.subject || 'Factura electrónica registrada'} · ${data.date || ''} · Subido a Drive`;
+    if (sub) sub.textContent = `${data.subject || 'Factura electrónica registrada'} · ${data.date || ''} · Subido a Drive y listo para unir al Expediente`;
 
     if (data.pdfBase64) {
       const blob = b64ToBlob(data.pdfBase64, 'application/pdf');
       const fileName = `Correo_Confirmacion_Nube1_${getFolioSafe()}.pdf`;
       state.evidencias.correoBuzon = { blob, fileName };
       subirPdfEvidenciaADrive(blob, fileName);
+      if (typeof renderChecklistExpediente === 'function') renderChecklistExpediente();
     }
   } catch (err) {
-    showErr('err-step3', 'Error buscando correo: ' + err.message);
+    showErr('err-step3', 'Error generando PDF del correo: ' + err.message);
   } finally {
     if (btn && origHtml) btn.innerHTML = origHtml;
     setLoading('btn-buzon-correo', 'spin-buzon-correo', false);
@@ -1321,6 +1416,13 @@ async function llenarSheet() {
       if (btnPr) btnPr.style.display = 'inline-flex';
     }
 
+    if (typeof renderChecklistExpediente === 'function') renderChecklistExpediente();
+
+    // Auto-unir todos los PDFs en 1 solo Expediente y subirlo a Drive
+    if (typeof construirExpedienteUnidoBlob === 'function') {
+      construirExpedienteUnidoBlob(true).catch(() => {});
+    }
+
     // Auto-register as expense
     const categoria = document.getElementById('inp-categoria').value || 'OTROS';
     await autoRegistrarGasto(concepto, categoria, data.sheetUrl, state.facturaUrl);
@@ -1331,6 +1433,126 @@ async function llenarSheet() {
     showErr('err-step6','Error: '+err.message);
   } finally {
     setLoading('btn-sheets-fill','spin-sheets',false);
+  }
+}
+
+// ── UNIÓN DE TODOS LOS PDFS EN 1 SOLO EXPEDIENTE COMPLETO ────────────────────
+function getExpedientePartsList() {
+  const isUsd = state.cfdi && (String(state.cfdi.moneda).toUpperCase() === 'USD' || Boolean(state.evidencias?.banxico?.blob));
+  const parts = [
+    { key: 'contrarecibo', label: '1. Contrarecibo (1 Hoja)', blob: state.evidencias?.contrarecibo?.blob || null },
+    { key: 'factura',      label: '2. Factura PDF',           blob: state.pdfFile || null },
+    { key: 'sat',          label: '3. Validación SAT',        blob: state.satPdfBlob || null }
+  ];
+  if (isUsd) {
+    parts.push({ key: 'banxico', label: '4. Tipo Cambio Banxico FIX', blob: state.evidencias?.banxico?.blob || null });
+  }
+  parts.push(
+    { key: 'correoBuzon',  label: `${isUsd ? '5' : '4'}. Correo Confirmación Nube 1`, blob: state.evidencias?.correoBuzon?.blob || null },
+    { key: 'portal',       label: `${isUsd ? '6' : '5'}. Comprobante Nube 2`,         blob: state.evidencias?.portal?.blob || null }
+  );
+  return parts;
+}
+
+function renderChecklistExpediente() {
+  const wrap = document.getElementById('expediente-parts-checklist');
+  if (!wrap) return;
+  const parts = getExpedientePartsList();
+  wrap.innerHTML = parts.map(p => {
+    const ok = Boolean(p.blob);
+    const bg = ok ? '#dcfce7' : '#f1f5f9';
+    const col = ok ? '#166534' : '#64748b';
+    const border = ok ? '#86efac' : '#cbd5e1';
+    return `<span style="padding:4px 10px; border-radius:999px; background:${bg}; color:${col}; border:1px solid ${border}; font-weight:700;">${ok ? '✅' : '⚪'} ${p.label}</span>`;
+  }).join('');
+}
+
+async function construirExpedienteUnidoBlob(subirADrive = true) {
+  if (!window.PDFLib || !window.PDFLib.PDFDocument) {
+    throw new Error('La librería PDFLib aún está cargando. Intenta de nuevo en 2 segundos.');
+  }
+  const parts = getExpedientePartsList().filter(p => Boolean(p.blob));
+  if (parts.length === 0) {
+    throw new Error('Aún no hay archivos PDF generados en este flujo para unir.');
+  }
+
+  const mergedPdf = await window.PDFLib.PDFDocument.create();
+  let includedCount = 0;
+
+  for (const part of parts) {
+    try {
+      const ab = await part.blob.arrayBuffer();
+      const srcDoc = await window.PDFLib.PDFDocument.load(ab, { ignoreEncryption: true });
+      const copiedPages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices());
+      copiedPages.forEach(page => mergedPdf.addPage(page));
+      includedCount++;
+    } catch (partErr) {
+      console.warn(`Aviso al unir ${part.label}:`, partErr.message);
+    }
+  }
+
+  if (includedCount === 0) {
+    throw new Error('No se pudieron leer las páginas de los archivos PDF.');
+  }
+
+  const mergedBytes = await mergedPdf.save();
+  const mergedBlob = new Blob([mergedBytes], { type: 'application/pdf' });
+  const provSafe = (document.getElementById('inp-proveedor')?.value?.trim() || state.cfdi?.nombreEmisor || 'Proveedor')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 35);
+  const fileName = `Expediente_Completo_${provSafe}_${getFolioSafe()}.pdf`;
+
+  state.evidencias.expedienteUnido = { blob: mergedBlob, fileName };
+
+  const statusEl = document.getElementById('expediente-unido-status');
+  if (statusEl) {
+    statusEl.innerHTML = `✅ <strong>Expediente Unido Listo (${includedCount} documentos en 1 solo PDF):</strong> <code>${fileName}</code>`;
+  }
+
+  if (subirADrive) {
+    subirPdfEvidenciaADrive(mergedBlob, fileName);
+  }
+
+  return { blob: mergedBlob, fileName, includedCount };
+}
+
+async function unirYDescargarExpedienteCompleto(imprimir = false) {
+  hideErr('err-step6');
+  const btnId = imprimir ? 'btn-print-expediente' : 'btn-merge-expediente';
+  const btn = document.getElementById(btnId);
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Uniendo PDFs en 1 solo archivo...';
+  }
+
+  try {
+    const { blob, fileName } = await construirExpedienteUnidoBlob(true);
+    const url = URL.createObjectURL(blob);
+
+    if (imprimir) {
+      const win = window.open(url, '_blank');
+      if (win) {
+        win.addEventListener('load', () => {
+          try { win.print(); } catch (e) {}
+        });
+      }
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 8000);
+    }
+  } catch (err) {
+    showErr('err-step6', 'Error al unir el expediente PDF: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
   }
 }
 
