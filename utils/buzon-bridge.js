@@ -1,195 +1,171 @@
-const https = require('https');
-const http = require('http');
-const { URL } = require('url');
-const { getAuthorizedClient } = require('../routes/drive');
+const crypto = require('crypto');
+const axios = require('axios');
 
-const ANTIGRAVITY_FOLDER_ID = '1KaGywtG0CnKVKJE5wL8cVSq48U7tvl0F';
-const BRIDGE_FILENAME = 'puente_buzon_farrera.json';
-const DIRECT_ORIGIN = 'https://autotec.farrera.net:60002';
+const DO_SUPABASE_URL = 'https://ihwucfdwjnguwjxncwdw.supabase.co';
+const DO_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlod3VjZmR3am5ndXdqeG5jd2R3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NzY4MzQsImV4cCI6MjA5NTA1MjgzNH0.A2ND8DKBDGQ6ymhUDs_x6qZtcStoUDyk_0akG2hVD7Q';
+const RELAY_DATE = '2099-12-30';
 
-let cachedBridge = null;
-let lastFetchTime = 0;
+const supaHeaders = {
+  apikey: DO_SUPABASE_KEY,
+  Authorization: `Bearer ${DO_SUPABASE_KEY}`,
+  'Content-Type': 'application/json'
+};
 
-async function getBridgeConfig(forceRefresh = false) {
-  if (!forceRefresh && cachedBridge && Date.now() - lastFetchTime < 30000) {
-    return cachedBridge;
-  }
-  try {
-    const auth = getAuthorizedClient();
-    if (!auth) return cachedBridge;
-    const { google } = require('googleapis');
-    const drive = google.drive({ version: 'v3', auth });
-    const res = await drive.files.list({
-      q: `'${ANTIGRAVITY_FOLDER_ID}' in parents and name = '${BRIDGE_FILENAME}' and trashed = false`,
-      fields: 'files(id, name)'
-    });
-    if (res.data.files && res.data.files.length > 0) {
-      const fileId = res.data.files[0].id;
-      const content = await drive.files.get({ fileId, alt: 'media' });
-      cachedBridge = typeof content.data === 'string' ? JSON.parse(content.data) : content.data;
-      lastFetchTime = Date.now();
-      return cachedBridge;
-    }
-  } catch (e) {
-    console.warn('⚠️ [BuzonBridge] Error leyendo config de Drive:', e.message);
-  }
-  return cachedBridge;
+// Caché en memoria para recursos estáticos de ASP.NET (JS, CSS, imágenes)
+const staticCache = new Map();
+
+function isStaticAsset(req) {
+  if (req.method !== 'GET') return false;
+  const u = req.originalUrl || req.url || '';
+  return (
+    u.startsWith('/ScriptResource.axd') ||
+    u.startsWith('/WebResource.axd') ||
+    u.startsWith('/jsUpdateProgress.js') ||
+    u.startsWith('/App_Themes/') ||
+    u.startsWith('/Scripts/') ||
+    u.includes('_TSM_CombinedScripts_')
+  );
+}
+
+async function getBridgeConfig() {
+  return { mode: 'supabase-https-relay', active: true };
 }
 
 async function saveBridgeConfig(config) {
-  const payload = {
-    url: String(config.url || '').replace(/\/+$/, ''),
-    hostname: config.hostname || 'Windows-Oficina',
-    updatedAt: new Date().toISOString()
-  };
-  cachedBridge = payload;
-  lastFetchTime = Date.now();
-
-  try {
-    const auth = getAuthorizedClient();
-    if (!auth) return payload;
-    const { google } = require('googleapis');
-    const drive = google.drive({ version: 'v3', auth });
-    const res = await drive.files.list({
-      q: `'${ANTIGRAVITY_FOLDER_ID}' in parents and name = '${BRIDGE_FILENAME}' and trashed = false`,
-      fields: 'files(id, name)'
-    });
-    const media = {
-      mimeType: 'application/json',
-      body: JSON.stringify(payload, null, 2)
-    };
-    if (res.data.files && res.data.files.length > 0) {
-      await drive.files.update({ fileId: res.data.files[0].id, media });
-    } else {
-      await drive.files.create({
-        resource: { name: BRIDGE_FILENAME, parents: [ANTIGRAVITY_FOLDER_ID] },
-        media
-      });
-    }
-  } catch (e) {
-    console.warn('⚠️ [BuzonBridge] Error guardando config en Drive:', e.message);
-  }
-  return payload;
+  return config;
 }
 
-function forwardHttpRequest(targetBaseUrl, req, bodyBuffer, timeoutMs = 12000) {
-  return new Promise((resolve, reject) => {
-    const parsedTarget = new URL(req.originalUrl, targetBaseUrl);
-    const isHttps = parsedTarget.protocol === 'https:';
-    const lib = isHttps ? https : http;
+async function relayViaSupabase(req, bodyBuffer, timeoutMs = 25000) {
+  const urlPath = req.originalUrl || req.url || '/buzonfecg.aspx';
 
-    const headers = {};
-    for (const [k, v] of Object.entries(req.headers)) {
-      const lower = k.toLowerCase();
-      if (['host', 'connection', 'content-length', 'accept-encoding', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-vercel-id'].includes(lower)) {
-        continue;
+  if (isStaticAsset(req) && staticCache.has(urlPath)) {
+    return staticCache.get(urlPath);
+  }
+
+  const reqId = crypto.randomBytes(8).toString('hex');
+  const folio = `__BUZON_REQ_${reqId}__`;
+
+  const cleanHeaders = {};
+  for (const [k, v] of Object.entries(req.headers || {})) {
+    const lower = k.toLowerCase();
+    if (
+      [
+        'host',
+        'connection',
+        'content-length',
+        'accept-encoding',
+        'x-forwarded-for',
+        'x-forwarded-host',
+        'x-forwarded-proto',
+        'x-vercel-id',
+        'x-vercel-deployment-url',
+        'x-vercel-forwarded-for'
+      ].includes(lower)
+    ) {
+      continue;
+    }
+    cleanHeaders[k] = v;
+  }
+
+  // 1. Insertar petición en cola HTTPS (puerto 443)
+  const insertRes = await axios.post(
+    `${DO_SUPABASE_URL}/rest/v1/taller_citas`,
+    {
+      folio,
+      fecha_cita: RELAY_DATE,
+      estado: 'PENDING',
+      datos_recepcion: {
+        reqId,
+        method: req.method,
+        path: urlPath,
+        headers: cleanHeaders,
+        bodyB64: bodyBuffer && bodyBuffer.length > 0 ? bodyBuffer.toString('base64') : ''
       }
-      headers[k] = v;
+    },
+    { headers: { ...supaHeaders, Prefer: 'return=representation' }, timeout: 8000 }
+  );
+
+  const rowId = Array.isArray(insertRes.data) && insertRes.data[0] ? insertRes.data[0].id : null;
+  const start = Date.now();
+
+  try {
+    // 2. Esperar respuesta del agente local (Mac / Windows)
+    while (Date.now() - start < timeoutMs) {
+      await new Promise(r => setTimeout(r, 250));
+      const pollRes = await axios.get(
+        `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.${encodeURIComponent(folio)}&select=estado,datos_recepcion`,
+        { headers: supaHeaders, timeout: 6000 }
+      );
+      const row = Array.isArray(pollRes.data) ? pollRes.data[0] : null;
+      if (row && row.estado === 'DONE' && row.datos_recepcion && row.datos_recepcion.res) {
+        const resObj = row.datos_recepcion.res;
+        if (isStaticAsset(req) && resObj.statusCode === 200) {
+          staticCache.set(urlPath, resObj);
+        }
+        return resObj;
+      }
+      if (row && row.estado === 'ERROR') {
+        throw new Error(row.datos_recepcion?.error || 'Error en agente local hacia autotec.farrera.net');
+      }
     }
-    // Preservar cookies de ASP.NET_SessionId y enviar host esperado por IIS de Farrera
-    headers['Host'] = parsedTarget.hostname === 'autotec.farrera.net'
-      ? 'autotec.farrera.net:60002'
-      : parsedTarget.host;
-    headers['User-Agent'] = req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
-    if (bodyBuffer && bodyBuffer.length > 0) {
-      headers['Content-Length'] = bodyBuffer.length;
+    throw new Error('Tiempo de espera agotado esperando respuesta del puente local.');
+  } finally {
+    // 3. Limpiar fila temporal
+    if (rowId) {
+      axios.delete(`${DO_SUPABASE_URL}/rest/v1/taller_citas?id=eq.${rowId}`, { headers: supaHeaders }).catch(() => {});
+    } else {
+      axios.delete(`${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.${encodeURIComponent(folio)}`, { headers: supaHeaders }).catch(() => {});
     }
-
-    const options = {
-      protocol: parsedTarget.protocol,
-      hostname: parsedTarget.hostname,
-      port: parsedTarget.port || (isHttps ? 443 : 80),
-      path: parsedTarget.pathname + parsedTarget.search,
-      method: req.method,
-      headers,
-      rejectUnauthorized: false,
-      timeout: timeoutMs
-    };
-
-    const proxyReq = lib.request(options, (proxyRes) => {
-      const chunks = [];
-      proxyRes.on('data', (c) => chunks.push(c));
-      proxyRes.on('end', () => {
-        resolve({
-          statusCode: proxyRes.statusCode || 200,
-          headers: proxyRes.headers,
-          body: Buffer.concat(chunks)
-        });
-      });
-    });
-
-    proxyReq.on('timeout', () => {
-      proxyReq.destroy(new Error(`Timeout (${timeoutMs}ms) conectando a ${targetBaseUrl}`));
-    });
-    proxyReq.on('error', (err) => reject(err));
-
-    if (bodyBuffer && bodyBuffer.length > 0) {
-      proxyReq.write(bodyBuffer);
-    }
-    proxyReq.end();
-  });
+  }
 }
 
 async function handleBuzonProxy(req, res) {
   try {
-    const chunks = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const bodyBuffer = Buffer.concat(chunks);
-
-    // 1. Verificar si hay un puente de oficina Windows registrado en Antigravity
-    const bridge = await getBridgeConfig();
-    let result = null;
-
-    if (bridge && bridge.url) {
-      try {
-        result = await forwardHttpRequest(bridge.url, req, bodyBuffer, 20000);
-      } catch (bridgeErr) {
-        console.warn('⚠️ [BuzonBridge] Falló puente Windows, probando conexión directa:', bridgeErr.message);
+    let bodyBuffer = Buffer.alloc(0);
+    if (Buffer.isBuffer(req.body)) {
+      bodyBuffer = req.body;
+    } else if (typeof req.body === 'string') {
+      bodyBuffer = Buffer.from(req.body);
+    } else {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
+      bodyBuffer = Buffer.concat(chunks);
     }
 
-    // 2. Si no hay puente o falló, intentar conexión directa a autotec.farrera.net:60002
-    if (!result) {
-      result = await forwardHttpRequest(DIRECT_ORIGIN, req, bodyBuffer, 10000);
-    }
+    const result = await relayViaSupabase(req, bodyBuffer, 25000);
 
-    // 3. Reenviar cabeceras (especialmente Set-Cookie de ASP.NET_SessionId)
-    if (result.headers['set-cookie']) {
-      const cleanedCookies = result.headers['set-cookie'].map(c =>
+    if (result.setCookie && Array.isArray(result.setCookie) && result.setCookie.length > 0) {
+      const cleanedCookies = result.setCookie.map(c =>
         c.replace(/;\s*domain=[^;]+/gi, '').replace(/;\s*secure/gi, '')
       );
       res.setHeader('Set-Cookie', cleanedCookies);
     }
 
-    const contentType = result.headers['content-type'] || 'application/octet-stream';
+    const contentType = result.contentType || 'text/html; charset=utf-8';
     res.setHeader('Content-Type', contentType);
-
-    if (contentType.includes('text/html')) {
-      let html = result.body.toString('utf8');
-      html = html.replace(/http:\/\/ajax\.googleapis\.com/g, 'https://ajax.googleapis.com');
-      return res.status(result.statusCode).send(html);
+    if (isStaticAsset(req)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
     }
 
-    return res.status(result.statusCode).send(result.body);
+    const resBuffer = Buffer.from(result.bodyB64 || '', 'base64');
+
+    if (contentType.includes('text/html')) {
+      let html = resBuffer.toString('utf8');
+      html = html.replace(/http:\/\/ajax\.googleapis\.com/g, 'https://ajax.googleapis.com');
+      return res.status(result.statusCode || 200).send(html);
+    }
+
+    return res.status(result.statusCode || 200).send(resBuffer);
   } catch (err) {
-    const bridge = cachedBridge;
     return res.status(502).send(`<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="utf-8"><title>Puente Buzón Farrera</title>
-<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:40px auto;padding:24px;background:#f8fafc;color:#1e293b}
-.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,0.05)}
-.btn{display:inline-block;background:#dc2626;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;margin-top:12px}</style>
-</head>
-<body>
-  <div class="card">
-    <h2>⚠️ El Buzón de Grupo Farrera requiere el Puente de Oficina Windows encendido</h2>
-    <p>El firewall de Grupo Farrera (<code>autotec.farrera.net:60002</code>) bloqueó la conexión desde EE.UU. (${err.message}).</p>
-    <p><strong>Estado del Puente Windows:</strong> ${bridge && bridge.url ? `Última conexión: ${bridge.url} (${bridge.updatedAt})` : 'Aún no iniciado en la PC de la oficina'}</p>
-    <p>En la computadora Windows de la oficina, descarga y ejecuta con doble clic el instalador automático:</p>
-    <a class="btn" href="/Instalar_Puente_Buzon_Farrera_Windows.bat" download>⬇️ Descargar Instalar_Puente_Buzon_Farrera_Windows.bat</a>
-  </div>
+<head><meta charset="utf-8"><title>Puente Buzón Farrera</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:24px;">
+  <h2>⚠️ Reintentando conexión con Buzón Grupo Farrera...</h2>
+  <p>Detalle: ${err.message}</p>
+  <button onclick="location.reload()" style="padding:10px 18px;background:#dc2626;color:#fff;border:none;border-radius:8px;cursor:pointer;">🔄 Recargar Página</button>
 </body></html>`);
   }
 }
