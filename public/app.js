@@ -203,6 +203,9 @@ function goStep1() {
     if (parsed.nombreEmisor) document.getElementById('inp-proveedor').value = parsed.nombreEmisor;
     if (parsed.nombreEmisor) document.getElementById('inp-proveedor-sheet').value = parsed.nombreEmisor;
     if (parsed.concepto) document.getElementById('inp-concepto').value = parsed.concepto;
+
+    // Cargar automáticamente el Captcha del portal oficial del SAT (Consulta por archivo XML)
+    iniciarCapturaPortalSAT();
   };
   reader.readAsText(state.xmlFile, 'UTF-8');
 }
@@ -334,8 +337,155 @@ async function verificarSAT() {
   }
 }
 
-// SAT server-side printing removed to save resources on older Macs.
+// ── Validación en Portal Oficial del SAT (Consulta por archivo XML) ───────────
+async function iniciarCapturaPortalSAT() {
+  hideErr('err-step1');
+  const btn = document.getElementById('btn-sat-portal');
+  const spin = document.getElementById('spin-sat-portal');
+  if (btn && spin) setLoading('btn-sat-portal', 'spin-sat-portal', true);
 
+  try {
+    const fd = new FormData();
+    if (state.xmlFile) fd.append('xml', state.xmlFile);
+    const savedGeminiKey = localStorage.getItem('gemini_api_key_sat') || '';
+    if (savedGeminiKey) fd.append('geminiKey', savedGeminiKey);
+
+    const r = await fetch('/api/sat/iniciar-portal', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!data.ok) return showErr('err-step1', data.error || 'No se pudo cargar el Captcha del SAT.');
+
+    state.satPortalSessionToken = data.satSessionToken || data.sessionId;
+    const capImg = document.getElementById('sat-captcha-img');
+    const capBox = document.getElementById('sat-captcha-box');
+    const capInp = document.getElementById('inp-sat-captcha');
+    if (capImg) capImg.src = data.captchaImage;
+    if (capBox) capBox.style.display = 'block';
+    if (capInp) {
+      capInp.value = data.autoCode || '';
+      capInp.focus();
+    }
+  } catch (err) {
+    showErr('err-step1', 'Error conectando al portal del SAT: ' + err.message);
+  } finally {
+    if (btn && spin) setLoading('btn-sat-portal', 'spin-sat-portal', false);
+  }
+}
+
+function base64ToFile(dataUrl, filename, mimeType) {
+  const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+  const binStr = atob(base64);
+  const len = binStr.length;
+  const arr = new Uint8Array(len);
+  for (let i = 0; i < len; i++) arr[i] = binStr.charCodeAt(i);
+  return new File([arr], filename, { type: mimeType || 'application/pdf' });
+}
+
+async function resolverCapturaPortalSAT() {
+  hideErr('err-step1');
+  const capInp = document.getElementById('inp-sat-captcha');
+  const code = capInp ? capInp.value.trim() : '';
+  if (!code) return showErr('err-step1', 'Escribe los 5 caracteres de la imagen del Captcha del SAT.');
+  if (!state.xmlFile) return showErr('err-step1', 'Selecciona primero el archivo XML en el Paso 1.');
+  if (!state.satPortalSessionToken) return showErr('err-step1', 'Primero haz clic en Cargar Captcha del SAT.');
+
+  setLoading('btn-sat-solve', 'spin-sat-solve', true);
+  try {
+    const fd = new FormData();
+    fd.append('xml', state.xmlFile);
+    fd.append('captchaCode', code);
+    fd.append('satSessionToken', state.satPortalSessionToken);
+
+    const r = await fetch('/api/sat/resolver-portal', { method: 'POST', body: fd });
+    const data = await r.json();
+
+    if (!data.ok) {
+      if (data.retryCaptcha && data.newCaptchaImage) {
+        state.satPortalSessionToken = data.satSessionToken || data.sessionId;
+        const capImg = document.getElementById('sat-captcha-img');
+        if (capImg) capImg.src = data.newCaptchaImage;
+        if (capInp) { capInp.value = ''; capInp.focus(); }
+      }
+      return showErr('err-step1', data.error || 'Error al verificar en el portal del SAT.');
+    }
+
+    // Éxito: Mostrar confirmación oficial del portal del SAT
+    const dp = data.datosPortal || {};
+    const estado = (data.estado || dp.estado || 'Vigente').toLowerCase();
+    const badge = document.getElementById('sat-badge');
+    if (badge) {
+      badge.style.display = 'flex';
+      badge.className = 'badge ' + (estado.includes('vigente') ? 'vigente' : estado.includes('cancelado') ? 'cancelado' : 'warning');
+      document.getElementById('sat-icon').textContent = estado.includes('vigente') ? '✅' : '⚠️';
+      document.getElementById('sat-title').textContent = `CFDI ${dp.estado || 'Vigente'} (Portal Oficial SAT — Consulta por XML)`;
+      document.getElementById('sat-sub').textContent = data.codigoEstatus || '';
+    }
+
+    const resBox = document.getElementById('sat-portal-result');
+    const tblPreview = document.getElementById('sat-portal-table-preview');
+    if (resBox) resBox.style.display = 'block';
+    if (tblPreview) {
+      tblPreview.innerHTML = `
+        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+          <tr style="background:#f1f5f9; font-weight:700;">
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">RFC del emisor</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Nombre o razón social del emisor</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">RFC del receptor</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Nombre o razón social del receptor</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.rfcEmisor || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.nombreEmisor || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.rfcReceptor || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.nombreReceptor || '—'}</td>
+          </tr>
+          <tr style="background:#f1f5f9; font-weight:700;">
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Folio fiscal</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Fecha de expedición</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Fecha certificación SAT</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">PAC que certificó</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1; font-family:monospace;">${dp.uuid || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.fechaEmision || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.fechaCertificacion || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.rfcPac || '—'}</td>
+          </tr>
+          <tr style="background:#f1f5f9; font-weight:700;">
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Total del CFDI</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Efecto del comprobante</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Estado CFDI</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">Estatus de cancelación</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1; font-weight:700;">${dp.total || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.efecto || '—'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1; font-weight:800; color:#15803d;">${dp.estado || 'Vigente'}</td>
+            <td style="padding:6px 8px; border:1px solid #cbd5e1;">${dp.estatusCancelacion || dp.esCancelable || '—'}</td>
+          </tr>
+        </table>
+      `;
+    }
+
+    if (data.pdfBase64) {
+      const folioTag = (state.cfdi?.noFactura || dp.uuid || 'CFDI').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const pdfFileName = `Validacion_SAT_${folioTag}.pdf`;
+      state.satPdfBase64 = data.pdfBase64;
+      state.satPdfFile = base64ToFile(data.pdfBase64, pdfFileName, 'application/pdf');
+      const dlBtn = document.getElementById('btn-dl-sat-pdf');
+      if (dlBtn) {
+        dlBtn.href = data.pdfBase64;
+        dlBtn.download = pdfFileName;
+      }
+    }
+
+    state.satOk = true;
+    document.getElementById('btn-next1').disabled = false;
+  } catch (err) {
+    showErr('err-step1', 'Error al validar XML en el portal del SAT: ' + err.message);
+  } finally {
+    setLoading('btn-sat-solve', 'spin-sat-solve', false);
+  }
+}
 
 function closeCaptcha() {
     const overlay = document.getElementById('captcha-overlay');
@@ -368,6 +518,7 @@ async function subirDrive() {
   const fd = new FormData();
   fd.append('xml', state.xmlFile);
   fd.append('pdf', state.pdfFile);
+  if (state.satPdfFile) fd.append('sat_pdf', state.satPdfFile);
   fd.append('proveedorNombre', proveedor);
   if (state.sucursalFolderId) fd.append('parentFolderId', state.sucursalFolderId);
 
