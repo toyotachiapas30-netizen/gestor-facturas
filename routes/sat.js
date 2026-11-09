@@ -176,16 +176,22 @@ async function generateOfficialSatPdf(datos) {
   const { width, height } = page.getSize();
   let y = height - 45;
 
-  // Logo SHCP / SAT
+  // Encabezado Institucional SHCP / SAT
+  let drewLogo = false;
   const logoBytes = await getSatLogoBytes();
   if (logoBytes) {
     try {
       const jpgImage = await pdfDoc.embedJpg(logoBytes);
       page.drawImage(jpgImage, { x: 40, y: y - 32, width: 220, height: 30 });
+      drewLogo = true;
     } catch (e) {}
-  } else {
-    page.drawText('SHCP | SAT - Servicio de Administración Tributaria', {
-      x: 40, y: y - 15, size: 12, font: fontBold, color: rgb(0.4, 0.1, 0.15)
+  }
+  if (!drewLogo) {
+    page.drawText('HACIENDA | SAT — Servicio de Administración Tributaria', {
+      x: 40, y: y - 18, size: 12, font: fontBold, color: rgb(0.45, 0.1, 0.18)
+    });
+    page.drawText('FACTURA ELECTRÓNICA — Verificación Oficial CFDI', {
+      x: 40, y: y - 31, size: 8.5, font: fontRegular, color: rgb(0.35, 0.35, 0.35)
     });
   }
 
@@ -206,6 +212,32 @@ async function generateOfficialSatPdf(datos) {
   y -= 24;
 
   const colW = (width - 80) / 4;
+  const wrapCellText = (str, maxChars = 22) => {
+    const t = String(str || '').trim();
+    if (!t) return [''];
+    if (!t.includes(' ') && t.length > maxChars) {
+      // UUIDs sin espacios: cortar en el guion más cercano
+      const idx = t.lastIndexOf('-', maxChars);
+      if (idx > 8) return [t.slice(0, idx + 1), t.slice(idx + 1)];
+      return [t.slice(0, maxChars), t.slice(maxChars)];
+    }
+    const words = t.split(/\s+/);
+    const lines = [];
+    let current = '';
+    for (const w of words) {
+      if (!current) {
+        current = w;
+      } else if ((current + ' ' + w).length <= maxChars) {
+        current += ' ' + w;
+      } else {
+        lines.push(current);
+        current = w;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.slice(0, 3);
+  };
+
   const drawTableSection = (headers, values) => {
     // Header row
     page.drawRectangle({ x: 40, y: y - 22, width: width - 80, height: 22, color: rgb(0.93, 0.93, 0.93) });
@@ -221,18 +253,15 @@ async function generateOfficialSatPdf(datos) {
     y -= 22;
 
     // Data row
-    const rowH = 34;
+    const rowH = 38;
     page.drawRectangle({
       x: 40, y: y - rowH, width: width - 80, height: rowH,
       borderColor: rgb(0.85, 0.85, 0.85), borderWidth: 0.75, color: rgb(1, 1, 1)
     });
     values.forEach((val, i) => {
       const text = String(val || '');
-      const lines = [];
-      for (let pos = 0; pos < text.length; pos += 22) {
-        lines.push(text.slice(pos, pos + 22));
-      }
-      lines.slice(0, 2).forEach((ln, idx) => {
+      const lines = wrapCellText(text, 22);
+      lines.forEach((ln, idx) => {
         page.drawText(ln, {
           x: 45 + i * colW,
           y: y - 13 - idx * 10,
