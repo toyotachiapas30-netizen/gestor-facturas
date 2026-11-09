@@ -17,6 +17,20 @@ const SAT_PORTAL_URL = 'https://verificacfdi.facturaelectronica.sat.gob.mx/defau
 
 // Sesiones interactivas temporales (cuando se usa el modo asistido sin llave o de respaldo)
 const activeSatSessions = new Map();
+const satJobs = new Map();
+
+function cleanupOldSatJobs() {
+  const now = Date.now();
+  for (const [id, job] of satJobs.entries()) {
+    if (now - job.updatedAt > 15 * 60 * 1000) satJobs.delete(id);
+  }
+}
+
+function setSatJob(jobId, data) {
+  cleanupOldSatJobs();
+  const prev = satJobs.get(jobId) || {};
+  satJobs.set(jobId, { ...prev, ...data, updatedAt: Date.now() });
+}
 
 function cleanupSatSession(sessionId) {
   const s = activeSatSessions.get(sessionId);
@@ -272,12 +286,124 @@ async function submitSatXmlCaptchaAndCapture(page, xmlPath, code) {
   };
 }
 
+// ── Helper en segundo plano para captura del SAT ───────────────────────────
+async function runSatXmlJob(jobId, tmpXmlPath, geminiKey) {
+  let browser = null;
+  try {
+    setSatJob(jobId, { status: 'running', step: '⏳ 1/3 Abriendo portal oficial del SAT (Consulta por XML)...' });
+    browser = await launchBrowser();
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 1000 });
+
+    console.log('🌐 [SAT Robot] Abriendo portal oficial del SAT (Consulta por XML)...');
+    await page.goto(SAT_PORTAL_URL, { waitUntil: 'domcontentloaded', timeout: 40000 });
+    await page.waitForSelector('#chkXml', { timeout: 15000 });
+
+    // Cambiar a la pestaña "Consulta por archivo XML"
+    await page.evaluate(() => {
+      const chk = document.getElementById('chkXml');
+      if (chk) {
+        chk.checked = true;
+        chk.click();
+      }
+      if (typeof guardarTab === 'function') guardarTab('verificaXml');
+      if (typeof cambiarTab === 'function') cambiarTab('verificaXml');
+    });
+    await new Promise((r) => setTimeout(r, 800));
+
+    // Subir el archivo XML
+    const fileInput = await page.$('#ctl00_MainContent_fileUploadXML');
+    if (!fileInput) throw new Error('No se encontró el campo de archivo XML en la página del SAT.');
+    await fileInput.uploadFile(tmpXmlPath);
+    await page.evaluate(() => {
+      const fi = document.getElementById('ctl00_MainContent_fileUploadXML');
+      if (fi) fi.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // Esperar a que la imagen del Captcha esté cargada
+    await page.waitForSelector('#ctl00_MainContent_ImgCaptchaXml', { visible: true, timeout: 10000 });
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 3. Si tenemos Gemini API Key configurada, intentar resolver automáticamente (hasta 4 intentos)
+    let geminiErrorMsg = null;
+    if (geminiKey) {
+      for (let intento = 1; intento <= 4; intento++) {
+        try {
+          setSatJob(jobId, { status: 'running', step: `⏳ 2/3 Leyendo Captcha con Gemini IA (intento ${intento}/4)...` });
+          const captchaEl = await page.$('#ctl00_MainContent_ImgCaptchaXml');
+          const capB64 = await captchaEl.screenshot({ encoding: 'base64' });
+          console.log(`🤖 [SAT Robot] Leyendo Captcha con Gemini (intento ${intento}/4)...`);
+          const codigoLeido = await solveCaptchaWithGemini(capB64, geminiKey);
+          console.log(`🔢 [SAT Robot] Gemini leyó: "${codigoLeido}"`);
+
+          setSatJob(jobId, { status: 'running', step: `⏳ 3/3 Verificando en el SAT (${codigoLeido}) y generando PDF...` });
+          const attemptResult = await submitSatXmlCaptchaAndCapture(page, tmpXmlPath, codigoLeido);
+          if (attemptResult.ok) {
+            try { fs.unlinkSync(tmpXmlPath); } catch (e) {}
+            await browser.close().catch(() => {});
+            console.log('✅ [SAT Robot] Captura real y PDF oficial del SAT generados con éxito.');
+            const finalResult = {
+              ok: true,
+              modo: 'gemini',
+              intentos: intento,
+              codigoCaptcha: codigoLeido,
+              screenshot: attemptResult.screenshot,
+              pdfBase64: attemptResult.pdfBase64,
+              summaryText: attemptResult.summaryText
+            };
+            setSatJob(jobId, { status: 'done', step: '✅ Comprobante oficial generado', result: finalResult });
+            return finalResult;
+          }
+          console.warn(`⚠️ [SAT Robot] Captcha rechazado en intento ${intento}, reintentando con nuevo captcha...`);
+          await new Promise((r) => setTimeout(r, 700));
+        } catch (gemErr) {
+          geminiErrorMsg = gemErr.message;
+          console.warn(`⚠️ [SAT Robot] Aviso Gemini en intento ${intento}:`, gemErr.message);
+          break;
+        }
+      }
+    }
+
+    // 4. Si no hay llave de Gemini configurada (o si tras 4 intentos el captcha siguió difícil),
+    // dejamos la sesión del navegador abierta 2 minutos y mandamos la miniatura del Captcha al usuario:
+    const captchaEl = await page.$('#ctl00_MainContent_ImgCaptchaXml');
+    const captchaB64 = await captchaEl.screenshot({ encoding: 'base64' });
+    const newSessionId = `sat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const timer = setTimeout(() => cleanupSatSession(newSessionId), 120000);
+    activeSatSessions.set(newSessionId, {
+      browser,
+      page,
+      xmlPath: tmpXmlPath,
+      timer
+    });
+
+    const manualRes = {
+      ok: true,
+      needsManualCaptcha: true,
+      sessionId: newSessionId,
+      captchaImage: `data:image/png;base64,${captchaB64}`,
+      geminiConfigured: Boolean(geminiKey),
+      geminiError: geminiErrorMsg
+    };
+    setSatJob(jobId, { status: 'done', step: '🔢 Requiere Captcha manual', result: manualRes });
+    return manualRes;
+  } catch (err) {
+    try { fs.unlinkSync(tmpXmlPath); } catch (e) {}
+    if (browser) await browser.close().catch(() => {});
+    console.error('🔥 [SAT Robot] Error:', err.message);
+    setSatJob(jobId, { status: 'error', error: err.message });
+    throw err;
+  }
+}
+
 // ── POST /api/sat/captura-xml ──────────────────────────────────────────────
 // Sube el archivo XML en "Consulta por archivo XML" del portal oficial del SAT,
 // resuelve el Captcha con Gemini IA (o con código manual si se envía manualCaptcha)
 // y devuelve la captura real + PDF oficial de 1 hoja del SAT.
 router.post('/captura-xml', upload.single('xml'), async (req, res) => {
   const { sessionId, manualCaptcha } = req.body || {};
+  const asyncMode = req.body?.asyncJob === 'true' || req.body?.asyncJob === true;
 
   // 1. Si viene de una sesión interactiva abierta con manualCaptcha:
   if (sessionId && manualCaptcha && activeSatSessions.has(sessionId)) {
@@ -320,110 +446,34 @@ router.post('/captura-xml', upload.single('xml'), async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Se requiere adjuntar el archivo XML de la factura.' });
   }
 
-  const tmpXmlPath = path.join(os.tmpdir(), `sat_cfdi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.xml`);
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const tmpXmlPath = path.join(os.tmpdir(), `sat_cfdi_${stamp}.xml`);
   fs.writeFileSync(tmpXmlPath, xmlFile.buffer);
 
   const geminiKey = getGeminiApiKey();
-  let browser = null;
+  const jobId = `satjob_${stamp}`;
+  setSatJob(jobId, { status: 'running', step: '⏳ 1/3 Abriendo portal oficial del SAT...' });
+
+  if (asyncMode) {
+    runSatXmlJob(jobId, tmpXmlPath, geminiKey).catch(() => {});
+    return res.json({ ok: true, asyncJob: true, jobId });
+  }
 
   try {
-    browser = await launchBrowser();
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 1000 });
-
-    console.log('🌐 [SAT Robot] Abriendo portal oficial del SAT (Consulta por XML)...');
-    await page.goto(SAT_PORTAL_URL, { waitUntil: 'domcontentloaded', timeout: 40000 });
-    await page.waitForSelector('#chkXml', { timeout: 15000 });
-
-    // Cambiar a la pestaña "Consulta por archivo XML"
-    await page.evaluate(() => {
-      const chk = document.getElementById('chkXml');
-      if (chk) {
-        chk.checked = true;
-        chk.click();
-      }
-      if (typeof guardarTab === 'function') guardarTab('verificaXml');
-      if (typeof cambiarTab === 'function') cambiarTab('verificaXml');
-    });
-    await new Promise((r) => setTimeout(r, 800));
-
-    // Subir el archivo XML
-    const fileInput = await page.$('#ctl00_MainContent_fileUploadXML');
-    if (!fileInput) throw new Error('No se encontró el campo de archivo XML en la página del SAT.');
-    await fileInput.uploadFile(tmpXmlPath);
-    await page.evaluate(() => {
-      const fi = document.getElementById('ctl00_MainContent_fileUploadXML');
-      if (fi) fi.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-
-    // Esperar a que la imagen del Captcha esté cargada
-    await page.waitForSelector('#ctl00_MainContent_ImgCaptchaXml', { visible: true, timeout: 10000 });
-    await new Promise((r) => setTimeout(r, 500));
-
-    // 3. Si tenemos Gemini API Key configurada, intentar resolver automáticamente (hasta 4 intentos)
-    let geminiErrorMsg = null;
-    if (geminiKey) {
-      for (let intento = 1; intento <= 4; intento++) {
-        try {
-          const captchaEl = await page.$('#ctl00_MainContent_ImgCaptchaXml');
-          const capB64 = await captchaEl.screenshot({ encoding: 'base64' });
-          console.log(`🤖 [SAT Robot] Leyendo Captcha con Gemini (intento ${intento}/4)...`);
-          const codigoLeido = await solveCaptchaWithGemini(capB64, geminiKey);
-          console.log(`🔢 [SAT Robot] Gemini leyó: "${codigoLeido}"`);
-
-          const attemptResult = await submitSatXmlCaptchaAndCapture(page, tmpXmlPath, codigoLeido);
-          if (attemptResult.ok) {
-            try { fs.unlinkSync(tmpXmlPath); } catch (e) {}
-            await browser.close().catch(() => {});
-            console.log('✅ [SAT Robot] Captura real y PDF oficial del SAT generados con éxito.');
-            return res.json({
-              ok: true,
-              modo: 'gemini',
-              intentos: intento,
-              codigoCaptcha: codigoLeido,
-              screenshot: attemptResult.screenshot,
-              pdfBase64: attemptResult.pdfBase64,
-              summaryText: attemptResult.summaryText
-            });
-          }
-          console.warn(`⚠️ [SAT Robot] Captcha rechazado en intento ${intento}, reintentando con nuevo captcha...`);
-          await new Promise((r) => setTimeout(r, 700));
-        } catch (gemErr) {
-          geminiErrorMsg = gemErr.message;
-          console.warn(`⚠️ [SAT Robot] Aviso Gemini en intento ${intento}:`, gemErr.message);
-          break;
-        }
-      }
-    }
-
-    // 4. Si no hay llave de Gemini configurada (o si tras 3 intentos el captcha siguió difícil),
-    // dejamos la sesión del navegador abierta 2 minutos y mandamos la miniatura del Captcha al usuario:
-    const captchaEl = await page.$('#ctl00_MainContent_ImgCaptchaXml');
-    const captchaB64 = await captchaEl.screenshot({ encoding: 'base64' });
-    const newSessionId = `sat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-    const timer = setTimeout(() => cleanupSatSession(newSessionId), 120000);
-    activeSatSessions.set(newSessionId, {
-      browser,
-      page,
-      xmlPath: tmpXmlPath,
-      timer
-    });
-
-    return res.json({
-      ok: true,
-      needsManualCaptcha: true,
-      sessionId: newSessionId,
-      captchaImage: `data:image/png;base64,${captchaB64}`,
-      geminiConfigured: Boolean(geminiKey),
-      geminiError: geminiErrorMsg
-    });
+    const result = await runSatXmlJob(jobId, tmpXmlPath, geminiKey);
+    return res.json(result);
   } catch (err) {
-    try { fs.unlinkSync(tmpXmlPath); } catch (e) {}
-    if (browser) await browser.close().catch(() => {});
-    console.error('🔥 [SAT Robot] Error:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ── GET /api/sat/captura-xml-status/:jobId ─────────────────────────────────
+router.get('/captura-xml-status/:jobId', (req, res) => {
+  const job = satJobs.get(req.params.jobId);
+  if (!job) {
+    return res.status(404).json({ ok: false, error: 'La tarea del SAT expiró o el servidor se reinició. Intenta de nuevo.' });
+  }
+  return res.json({ ok: true, ...job });
 });
 
 module.exports = router;

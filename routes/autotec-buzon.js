@@ -249,15 +249,10 @@ router.get('/buzon-status/:jobId', (req, res) => {
 });
 
 // ── POST /api/autotec/correo-confirmacion ─────────────────────────────
-router.post('/correo-confirmacion', async (req, res) => {
-  const { folio, uuid, rfcEmisor } = req.body || {};
-  const client = getAuthorizedClient();
-  if (!client) {
-    return res.status(401).json({ ok: false, error: 'Gmail no está conectado.' });
-  }
-
+async function runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client }) {
   let browser = null;
   try {
+    buzonJobs.set(jobId, { status: 'running', step: '⏳ 1/2 Buscando correo de notifica@gfarrera.com.mx en Gmail...' });
     const gmail = getGoogle().gmail({ version: 'v1', auth: client });
 
     const queries = [];
@@ -298,11 +293,13 @@ router.post('/correo-confirmacion', async (req, res) => {
     }
 
     if (!matchedMsg) {
-      return res.json({
+      const notFoundRes = {
         ok: false,
         notFound: true,
         error: `Aún no aparece el correo de confirmación de notifica@gfarrera.com.mx para el folio ${folio || uuid || ''} en la bandeja conectada (toyotachiapas30@gmail.com). Si ya enviaste en el Buzón con toyotachiapas30@gmail.com, espera ~30 segundos y vuelve a dar clic.`
-      });
+      };
+      buzonJobs.set(jobId, { status: 'done', result: notFoundRes });
+      return notFoundRes;
     }
 
     const headers = matchedMsg.full.payload?.headers || [];
@@ -340,6 +337,7 @@ router.post('/correo-confirmacion', async (req, res) => {
 </body>
 </html>`;
 
+    buzonJobs.set(jobId, { status: 'running', step: '⏳ 2/2 Generando captura real y PDF del correo...' });
     browser = await launchBrowser();
     const page = await browser.newPage();
     await page.setViewport({ width: 1024, height: 900 });
@@ -354,16 +352,42 @@ router.post('/correo-confirmacion', async (req, res) => {
 
     await browser.close().catch(() => {});
 
-    return res.json({
+    const finalRes = {
       ok: true,
       subject,
       from,
       date: dateStr,
       screenshot: `data:image/png;base64,${screenshotB64}`,
       pdfBase64: Buffer.from(pdfBuf).toString('base64')
-    });
+    };
+    buzonJobs.set(jobId, { status: 'done', result: finalRes });
+    return finalRes;
   } catch (err) {
     if (browser) await browser.close().catch(() => {});
+    buzonJobs.set(jobId, { status: 'error', error: err.message });
+    throw err;
+  }
+}
+
+router.post('/correo-confirmacion', async (req, res) => {
+  const { folio, uuid, rfcEmisor, asyncJob } = req.body || {};
+  const client = getAuthorizedClient();
+  if (!client) {
+    return res.status(401).json({ ok: false, error: 'Gmail no está conectado.' });
+  }
+
+  const jobId = `mail_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  buzonJobs.set(jobId, { status: 'running', step: '⏳ Buscando correo en Gmail...' });
+
+  if (asyncJob === 'true' || asyncJob === true) {
+    runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client }).catch(() => {});
+    return res.json({ ok: true, asyncJob: true, jobId });
+  }
+
+  try {
+    const result = await runCorreoConfirmacionJob(jobId, { folio, uuid, rfcEmisor, client });
+    return res.json(result);
+  } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

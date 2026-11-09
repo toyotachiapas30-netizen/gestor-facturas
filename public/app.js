@@ -497,16 +497,54 @@ async function generarCapturaRealSAT() {
   }
 
   try {
-    const fd = new FormData();
-    fd.append('xml', state.xmlFile);
+    let startData = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const fd = new FormData();
+      fd.append('xml', state.xmlFile);
+      fd.append('asyncJob', 'true');
 
-    const r = await fetch('/api/sat/captura-xml', {
-      method: 'POST',
-      body: fd
-    });
-    const data = await r.json();
-    if (!data.ok && !data.needsManualCaptcha) {
-      return showErr('err-step1', data.error || 'No se pudo conectar al portal del SAT.');
+      const r = await fetch('/api/sat/captura-xml', {
+        method: 'POST',
+        body: fd
+      });
+      const rawText = await r.text();
+      try {
+        startData = JSON.parse(rawText);
+        break;
+      } catch (parseErr) {
+        if (attempt < 3) {
+          if (btn) btn.innerHTML = '⏳ Despertando servidor, reintentando...';
+          await new Promise(res => setTimeout(res, 3000));
+        } else {
+          throw new Error('El servidor se está iniciando. Espera 15 segundos y vuelve a dar clic.');
+        }
+      }
+    }
+
+    let data = startData;
+    if (startData && startData.asyncJob && startData.jobId) {
+      for (let i = 0; i < 55; i++) {
+        await new Promise(res => setTimeout(res, 2500));
+        const stRes = await fetch(`/api/sat/captura-xml-status/${startData.jobId}`);
+        const stText = await stRes.text();
+        let stData;
+        try { stData = JSON.parse(stText); } catch (e) { continue; }
+        if (!stData.ok) throw new Error(stData.error || 'Error consultando estado del SAT.');
+        if (btn && stData.step) {
+          btn.innerHTML = stData.step;
+        }
+        if (stData.status === 'done') {
+          data = stData.result;
+          break;
+        }
+        if (stData.status === 'error') {
+          throw new Error(stData.error || 'Error en el portal del SAT.');
+        }
+      }
+    }
+
+    if (!data || (!data.ok && !data.needsManualCaptcha)) {
+      return showErr('err-step1', data?.error || 'No se pudo conectar al portal del SAT.');
     }
 
     if (data.needsManualCaptcha) {
@@ -822,6 +860,8 @@ async function subirBuzon(soloValidar = false) {
 
 async function capturarCorreoConfirmacionBuzon() {
   hideErr('err-step3');
+  const btn = document.getElementById('btn-buzon-correo');
+  const origHtml = btn ? btn.innerHTML : '';
   setLoading('btn-buzon-correo', 'spin-buzon-correo', true);
 
   try {
@@ -832,12 +872,45 @@ async function capturarCorreoConfirmacionBuzon() {
         folio: state.cfdi?.noFactura || '',
         uuid: state.cfdi?.uuid || '',
         rfcEmisor: state.cfdi?.rfcEmisor || '',
-        nombreEmisor: state.cfdi?.nombreEmisor || ''
+        nombreEmisor: state.cfdi?.nombreEmisor || '',
+        asyncJob: true
       })
     });
-    const data = await r.json();
-    if (!data.ok) {
-      return showErr('err-step3', data.error || 'No se encontró el correo de confirmación aún.');
+    const rawText = await r.text();
+    let startData;
+    try {
+      startData = JSON.parse(rawText);
+    } catch (e) {
+      throw new Error('El servidor se está iniciando. Espera 15 segundos y vuelve a dar clic.');
+    }
+    if (!startData.ok && !startData.asyncJob) {
+      return showErr('err-step3', startData.error || 'No se encontró el correo de confirmación aún.');
+    }
+
+    let data = startData;
+    if (startData.asyncJob && startData.jobId) {
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 2500));
+        const stRes = await fetch(`/api/autotec/buzon-status/${startData.jobId}`);
+        const stText = await stRes.text();
+        let stData;
+        try { stData = JSON.parse(stText); } catch (e) { continue; }
+        if (!stData.ok) throw new Error(stData.error || 'Error consultando correo.');
+        if (btn && stData.step) {
+          btn.innerHTML = `<span class="spinner" style="display:inline-block"></span> ${stData.step}`;
+        }
+        if (stData.status === 'done') {
+          data = stData.result;
+          break;
+        }
+        if (stData.status === 'error') {
+          throw new Error(stData.error || 'Error generando PDF del correo.');
+        }
+      }
+    }
+
+    if (!data || !data.ok) {
+      return showErr('err-step3', data?.error || 'No se encontró el correo de confirmación aún.');
     }
 
     const box = document.getElementById('buzon-mail-result');
@@ -856,6 +929,7 @@ async function capturarCorreoConfirmacionBuzon() {
   } catch (err) {
     showErr('err-step3', 'Error buscando correo: ' + err.message);
   } finally {
+    if (btn && origHtml) btn.innerHTML = origHtml;
     setLoading('btn-buzon-correo', 'spin-buzon-correo', false);
   }
 }
