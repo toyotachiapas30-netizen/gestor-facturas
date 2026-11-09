@@ -2,73 +2,23 @@
 // Gestor de Facturas — Frontend App  v2
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Wrapper de fetch con reintento automático contra cierres de socket (502/504/empty body) ──
-(function installResilientApiFetch() {
-  const _rawFetch = window.fetch.bind(window);
-  window.fetch = async function resilientFetch(input, init) {
-    const urlStr = typeof input === 'string' ? input : (input?.url || '');
-    const isJsonApi = urlStr.startsWith('/api/') && !urlStr.startsWith('/api/mail/attachment/');
-    if (!isJsonApi) {
-      return _rawFetch(input, init);
-    }
-
-    const maxAttempts = 3;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const resp = await _rawFetch(input, init);
-        const clone = resp.clone();
-        const txt = (await clone.text()).trim();
-        const isHtmlOrEmpty = !txt || txt.startsWith('<!DOCTYPE') || txt.startsWith('<html') || resp.status === 502 || resp.status === 503 || resp.status === 504;
-
-        if (!isHtmlOrEmpty) {
-          return resp;
-        }
-
-        if (attempt < maxAttempts) {
-          console.warn(`🔄 [API Retry ${attempt}/${maxAttempts}] Respuesta vacía/HTML en ${urlStr}, renovando conexión...`);
-          await _rawFetch('/api/drive/status', { cache: 'no-store' }).catch(() => {});
-          await new Promise(r => setTimeout(r, 1800));
-          continue;
-        }
-
-        return new Response(
-          JSON.stringify({
-            ok: false,
-            error: 'La conexión tardó más de lo esperado o se renovó. Por favor vuelve a dar clic en el botón.'
-          }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
-        );
-      } catch (netErr) {
-        if (attempt < maxAttempts) {
-          await _rawFetch('/api/drive/status', { cache: 'no-store' }).catch(() => {});
-          await new Promise(r => setTimeout(r, 1800));
-          continue;
-        }
-        throw netErr;
-      }
-    }
-  };
-})();
-
 // ── State ─────────────────────────────────────────────────────────────────────
 const state = {
   xmlFile: null, pdfFile: null,
   cfdi: null,           // parsed CFDI fields
   satOk: false,         // step 2 done
   driveOk: false,       // step 3 done
-  driveFolderId: null,  // ID de carpeta del proveedor en Drive
   buzonOk: false,       // step 4 done
   mailSubject: null,    // step 5
   mailOk: false,
   portalOk: false,      // step 6
   selectedSheetId: null,// step 7
   sucursalFolderId: null, // Save selected branch
-  currentSessionId: null, // For Captcha Relay
-  evidencias: {}        // { buzon, correoBuzon, portal, banxico, contrarecibo }
+  currentSessionId: null  // For Captcha Relay
 };
 
-const TOTAL_STEPS = 6; // 1.Archivos, 2.SAT, 3.Drive, 4.Nube1, 5.Nube2, 6.Contrarecibo
-const STEP_MAP = [0, 1, 2, 3, 4, 5]; // Mapping of logical index to HTML element IDs
+const TOTAL_STEPS = 4; // Archivos, SAT, Drive, Contrarecibo
+const STEP_MAP = [0, 1, 2, 3]; // Mapping of logical index to HTML element IDs
 
 const CATEGORIAS = [
   'NORMATIVAS',
@@ -200,29 +150,11 @@ function goTo(n) {
 
   // Special behavior
   if (n === 3) {
-    // Paso 4: Nube 1 (Buzón Autotec + Bandeja en Vivo de Confirmaciones)
-    if (typeof checkBridgeStatus === 'function') checkBridgeStatus();
-    if (typeof cargarBandejaConfirmacionesNube1 === 'function') cargarBandejaConfirmacionesNube1(false);
-  }
-  if (n === 4) {
-    // Paso 5: Nube 2 (EnvioFacturasGastos)
-    if (typeof checkPortalConfig === 'function') checkPortalConfig();
-  }
-  if (n === 5) {
-    // Paso 6: Contrarecibo Google Sheets + Unir Expediente Completo
-    if (typeof renderChecklistExpediente === 'function') renderChecklistExpediente();
-    const sucSel = document.getElementById('inp-sucursal');
-    const sucName = sucSel ? sucSel.options[sucSel.selectedIndex].text : 'Toyota Chiapas';
+    // We are in Paso 4 (logical 4, index 3)
+    const sucName = document.getElementById('inp-sucursal').options[document.getElementById('inp-sucursal').selectedIndex].text;
     const indicator = document.getElementById('active-branch-name');
     if (indicator) indicator.textContent = sucName;
-    const banxicoBox = document.getElementById('banxico-box');
-    if (banxicoBox && state.cfdi && (String(state.cfdi.moneda).toUpperCase() === 'USD' || String(state.cfdi.nombreEmisor || '').toUpperCase().includes('PATTISON'))) {
-      banxicoBox.style.display = 'block';
-    }
-    loadSheets();
-    if (document.getElementById('inp-proveedor-sheet')?.value?.trim()) {
-      buscarSheetPorNombre();
-    }
+    loadSheets(); // Cargar automáticamente todas las hojas de esta sucursal
   }
 
   window.scrollTo({top:0,behavior:'smooth'});
@@ -321,18 +253,6 @@ function renderCFDI() {
   document.getElementById('d-ver').textContent     = c.version;
   document.getElementById('d-moneda').textContent  = c.moneda;
   document.getElementById('d-total').textContent   = fmtMonto(c.total, c.moneda);
-
-  // Reiniciar estado de captura real SAT y evidencias para la nueva factura
-  state.satPdfBlob = null;
-  state.satPdfBase64 = null;
-  state.driveFolderId = null;
-  state.evidencias = {};
-  currentSatSessionId = null;
-  ['sat-real-result-box', 'sat-manual-captcha-box', 'buzon-result', 'buzon-mail-result', 'portal-result', 'sheets-result', 'final-success'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
-  });
-  checkGeminiStatus();
   
   updateBookmarklet();
 }
@@ -379,10 +299,7 @@ async function verificarSAT() {
   document.getElementById('sat-badge').style.display='flex';
   document.getElementById('sat-details').innerHTML='';
   document.getElementById('btn-print-sat').style.display='none';
-  document.getElementById('btn-next1').disabled=false;
-
-  // Verificar estado de la llave de Gemini IA en paralelo
-  checkGeminiStatus();
+  document.getElementById('btn-next1').disabled=true;
 
   try {
     const r = await fetch('/api/sat/verificar', {
@@ -405,12 +322,10 @@ async function verificarSAT() {
     ].map(x=>`<div class="rrow"><span class="rk">${x.k}</span><span class="rv">${x.v||'—'}</span></div>`).join('');
 
     state.satOk = estado==='vigente';
+    document.getElementById('btn-print-sat').style.display='inline-flex';
     document.getElementById('btn-next1').disabled=false;
-
-    // Lanzar automáticamente la Captura Real del SAT al entrar al Paso 2
-    if (state.satOk && !state.satPdfBlob && state.xmlFile) {
-      generarCapturaRealSAT();
-    }
+    
+    // Auto-trigger print if requested (optional logic)
   } catch(err) {
     showErr('err-step1', 'No se pudo conectar: '+err.message);
     document.getElementById('sat-badge').style.display='none';
@@ -419,297 +334,8 @@ async function verificarSAT() {
   }
 }
 
-// ── ROBOT DE CAPTURA REAL DEL SAT (CONSULTA POR XML + GEMINI IA) ──────────────
-let currentSatSessionId = null;
+// SAT server-side printing removed to save resources on older Macs.
 
-async function checkGeminiStatus() {
-  try {
-    const r = await fetch('/api/sat/gemini-config');
-    const data = await r.json();
-    const pill = document.getElementById('gemini-status-badge');
-    if (!pill) return;
-    if (data.ok && data.configured) {
-      pill.textContent = `🟢 Gemini IA Activo (${data.maskedKey})`;
-      pill.style.background = '#dcfce7';
-      pill.style.color = '#166534';
-    } else {
-      pill.textContent = '⚡ Modo Asistido (Sin llave Gemini)';
-      pill.style.background = '#fef3c7';
-      pill.style.color = '#92400e';
-    }
-  } catch (e) {}
-}
-
-function toggleGeminiConfigBox() {
-  const box = document.getElementById('gemini-config-box');
-  if (!box) return;
-  box.style.display = box.style.display === 'none' ? 'block' : 'none';
-}
-
-async function guardarGeminiKey() {
-  const inp = document.getElementById('inp-gemini-key');
-  const msg = document.getElementById('gemini-key-msg');
-  if (!inp || !msg) return;
-  const apiKey = inp.value.trim();
-
-  msg.style.display = 'block';
-  msg.style.color = '#475569';
-  msg.textContent = '⏳ Guardando llave de Gemini IA en el servidor...';
-
-  try {
-    const r = await fetch('/api/sat/gemini-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey })
-    });
-    const data = await r.json();
-    if (!data.ok) throw new Error(data.error || 'Error al guardar');
-
-    inp.value = '';
-    msg.style.color = '#15803d';
-    msg.innerHTML = data.configured
-      ? `✅ <strong>Llave guardada permanentemente (${data.maskedKey}).</strong> Ahora Gemini resolverá los Captchas del SAT automáticamente.`
-      : 'ℹ️ Llave eliminada.';
-    await checkGeminiStatus();
-    setTimeout(() => {
-      const box = document.getElementById('gemini-config-box');
-      if (box && data.configured) box.style.display = 'none';
-    }, 1800);
-  } catch (err) {
-    msg.style.color = '#dc2626';
-    msg.textContent = '❌ Error: ' + err.message;
-  }
-}
-
-function b64ToBlob(b64Data, contentType = 'application/pdf') {
-  const byteCharacters = atob(b64Data);
-  const byteArrays = [];
-  for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-    const slice = byteCharacters.slice(offset, offset + 512);
-    const byteNumbers = new Array(slice.length);
-    for (let i = 0; i < slice.length; i++) {
-      byteNumbers[i] = slice.charCodeAt(i);
-    }
-    byteArrays.push(new Uint8Array(byteNumbers));
-  }
-  return new Blob(byteArrays, { type: contentType });
-}
-
-function mostrarResultadoCapturaSAT(data) {
-  hideErr('err-step1');
-  state.satOk = true;
-  const btnNext1 = document.getElementById('btn-next1');
-  if (btnNext1) btnNext1.disabled = false;
-
-  // Asegurar que el badge superior también muestre Vigente si el SOAP falló mientras reiniciaba
-  const badge = document.getElementById('sat-badge');
-  if (badge) {
-    badge.style.display = 'flex';
-    badge.className = 'badge vigente';
-    const icon = document.getElementById('sat-icon');
-    const title = document.getElementById('sat-title');
-    const sub = document.getElementById('sat-sub');
-    if (icon) icon.textContent = '✅';
-    if (title) title.textContent = 'CFDI Vigente (Validado en Portal Oficial SAT)';
-    if (sub && !sub.textContent) sub.textContent = 'Sello CFDI Válido — Consulta por archivo XML';
-  }
-
-  const manualBox = document.getElementById('sat-manual-captcha-box');
-  if (manualBox) manualBox.style.display = 'none';
-
-  const resBox = document.getElementById('sat-real-result-box');
-  const imgEl = document.getElementById('sat-real-screenshot-img');
-  const titleEl = document.getElementById('sat-real-result-title');
-
-  if (data.screenshot && imgEl) {
-    imgEl.src = data.screenshot;
-  }
-  if (data.pdfBase64) {
-    state.satPdfBase64 = data.pdfBase64;
-    state.satPdfBlob = b64ToBlob(data.pdfBase64, 'application/pdf');
-  }
-  if (titleEl) {
-    titleEl.textContent = data.modo === 'gemini'
-      ? `✅ Comprobante Oficial del SAT Generado con Gemini IA (Captcha resuelto: ${data.codigoCaptcha || 'OK'})`
-      : '✅ Comprobante Oficial del SAT Generado (Consulta por XML)';
-  }
-  if (resBox) resBox.style.display = 'block';
-  const btnPrint = document.getElementById('btn-print-sat');
-  if (btnPrint) btnPrint.style.display = 'inline-flex';
-}
-
-async function generarCapturaRealSAT() {
-  if (!state.xmlFile) {
-    return showErr('err-step1', 'Primero selecciona el archivo XML en el Paso 1.');
-  }
-  hideErr('err-step1');
-  const btn = document.getElementById('btn-sat-robot');
-  const originalText = btn ? btn.innerHTML : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '⏳ Abriendo portal SAT y resolviendo Captcha...';
-  }
-
-  try {
-    let startData = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const fd = new FormData();
-      fd.append('xml', state.xmlFile);
-      fd.append('asyncJob', 'true');
-
-      const r = await fetch('/api/sat/captura-xml', {
-        method: 'POST',
-        body: fd
-      });
-      const rawText = await r.text();
-      try {
-        startData = JSON.parse(rawText);
-        break;
-      } catch (parseErr) {
-        if (attempt < 3) {
-          if (btn) btn.innerHTML = '⏳ Despertando servidor, reintentando...';
-          await new Promise(res => setTimeout(res, 3000));
-        } else {
-          throw new Error('El servidor se está iniciando. Espera 15 segundos y vuelve a dar clic.');
-        }
-      }
-    }
-
-    let data = startData;
-    if (startData && startData.asyncJob && startData.jobId) {
-      for (let i = 0; i < 55; i++) {
-        await new Promise(res => setTimeout(res, 2500));
-        const stRes = await fetch(`/api/sat/captura-xml-status/${startData.jobId}`);
-        const stText = await stRes.text();
-        let stData;
-        try { stData = JSON.parse(stText); } catch (e) { continue; }
-        if (!stData.ok) throw new Error(stData.error || 'Error consultando estado del SAT.');
-        if (btn && stData.step) {
-          btn.innerHTML = stData.step;
-        }
-        if (stData.status === 'done') {
-          data = stData.result;
-          break;
-        }
-        if (stData.status === 'error') {
-          throw new Error(stData.error || 'Error en el portal del SAT.');
-        }
-      }
-    }
-
-    if (!data || (!data.ok && !data.needsManualCaptcha)) {
-      return showErr('err-step1', data?.error || 'No se pudo conectar al portal del SAT.');
-    }
-
-    if (data.needsManualCaptcha) {
-      currentSatSessionId = data.sessionId;
-      const manualBox = document.getElementById('sat-manual-captcha-box');
-      const capImg = document.getElementById('sat-captcha-img');
-      const inpCap = document.getElementById('inp-sat-manual-captcha');
-      const titleCap = document.getElementById('sat-manual-captcha-title');
-      if (capImg && data.captchaImage) capImg.src = data.captchaImage;
-      if (titleCap) {
-        titleCap.textContent = data.geminiConfigured
-          ? '⚠️ El Captcha del SAT estuvo difícil. Escribe los 5 números que ves en la imagen:'
-          : '🔢 Escribe los 5 números del Captcha del SAT (o configura tu llave gratuita de Gemini IA arriba para que lo haga solo):';
-      }
-      if (manualBox) manualBox.style.display = 'block';
-      if (inpCap) {
-        inpCap.value = '';
-        inpCap.focus();
-      }
-      return;
-    }
-
-    mostrarResultadoCapturaSAT(data);
-  } catch (err) {
-    showErr('err-step1', 'Error al capturar desde el SAT: ' + err.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = '📸 Obtener Captura Real del SAT';
-    }
-  }
-}
-
-async function enviarCaptchaManualSAT() {
-  const inp = document.getElementById('inp-sat-manual-captcha');
-  const btn = document.getElementById('btn-sat-send-captcha');
-  const code = inp ? inp.value.trim() : '';
-  if (!code || code.length < 4) {
-    return showErr('err-step1', 'Escribe los 5 dígitos que aparecen en la imagen del Captcha.');
-  }
-  hideErr('err-step1');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '⏳ Verificando en el SAT...';
-  }
-
-  try {
-    const fd = new FormData();
-    fd.append('sessionId', currentSatSessionId || '');
-    fd.append('manualCaptcha', code);
-    if (state.xmlFile) fd.append('xml', state.xmlFile);
-
-    const r = await fetch('/api/sat/captura-xml', {
-      method: 'POST',
-      body: fd
-    });
-    const data = await r.json();
-
-    if (data.needsManualCaptcha) {
-      currentSatSessionId = data.sessionId || currentSatSessionId;
-      const capImg = document.getElementById('sat-captcha-img');
-      if (capImg && data.captchaImage) capImg.src = data.captchaImage;
-      if (inp) {
-        inp.value = '';
-        inp.focus();
-      }
-      return showErr('err-step1', data.error || 'Código incorrecto, intenta con el nuevo Captcha.');
-    }
-
-    if (!data.ok) {
-      return showErr('err-step1', data.error || 'Error al verificar en el SAT.');
-    }
-
-    mostrarResultadoCapturaSAT(data);
-  } catch (err) {
-    showErr('err-step1', 'Error al enviar Captcha: ' + err.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = '✅ Verificar y Capturar';
-    }
-  }
-}
-
-function descargarPdfOficialSAT() {
-  if (!state.satPdfBlob) {
-    return showErr('err-step1', 'Primero genera la Captura Real del SAT.');
-  }
-  const folio = (state.cfdi?.noFactura || state.cfdi?.uuid?.slice(0, 8) || 'CFDI').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const url = URL.createObjectURL(state.satPdfBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `Validacion_SAT_${folio}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
-function imprimirPdfOficialSAT() {
-  if (!state.satPdfBlob) {
-    return generarCapturaRealSAT();
-  }
-  const url = URL.createObjectURL(state.satPdfBlob);
-  const win = window.open(url, '_blank');
-  if (win) {
-    win.addEventListener('load', () => {
-      try { win.print(); } catch (e) {}
-    });
-  }
-}
 
 function closeCaptcha() {
     const overlay = document.getElementById('captcha-overlay');
@@ -732,61 +358,6 @@ function copiarAlPortapapeles(id) {
   });
 }
 
-// ── Helper: Subir automáticamente PDFs de evidencia a la carpeta del proveedor en Drive ──
-async function subirPdfEvidenciaADrive(blob, customName) {
-  if (!blob) return null;
-  const proveedor = document.getElementById('inp-proveedor')?.value?.trim() || state.cfdi?.nombreEmisor || '';
-  if (!state.driveFolderId && !proveedor) return null;
-
-  try {
-    const fd = new FormData();
-    fd.append('file', blob, customName);
-    fd.append('customName', customName);
-    if (state.driveFolderId) fd.append('folderId', state.driveFolderId);
-    if (proveedor) fd.append('proveedorNombre', proveedor);
-    if (state.sucursalFolderId) fd.append('parentFolderId', state.sucursalFolderId);
-
-    const r = await fetch('/api/drive/upload-extra', { method: 'POST', body: fd });
-    const data = await r.json();
-    if (data.ok && data.folderId) {
-      state.driveFolderId = data.folderId;
-    }
-    return data;
-  } catch (e) {
-    console.warn('Aviso al respaldar evidencia en Drive:', e.message);
-    return null;
-  }
-}
-
-function getFolioSafe() {
-  return (state.cfdi?.noFactura || state.cfdi?.uuid?.slice(0, 8) || 'CFDI').replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-function descargarPdfEvidencia(tipo) {
-  const item = state.evidencias?.[tipo];
-  if (!item || !item.blob) return;
-  const url = URL.createObjectURL(item.blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = item.fileName || `${tipo}_${getFolioSafe()}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
-function imprimirPdfEvidencia(tipo) {
-  const item = state.evidencias?.[tipo];
-  if (!item || !item.blob) return;
-  const url = URL.createObjectURL(item.blob);
-  const win = window.open(url, '_blank');
-  if (win) {
-    win.addEventListener('load', () => {
-      try { win.print(); } catch (e) {}
-    });
-  }
-}
-
 // ── PASO 3: Google Drive ──────────────────────────────────────────────────────
 async function subirDrive() {
   hideErr('err-step2');
@@ -797,9 +368,6 @@ async function subirDrive() {
   const fd = new FormData();
   fd.append('xml', state.xmlFile);
   fd.append('pdf', state.pdfFile);
-  if (state.satPdfBlob) {
-    fd.append('satPdf', state.satPdfBlob, `Validacion_SAT_${getFolioSafe()}.pdf`);
-  }
   fd.append('proveedorNombre', proveedor);
   if (state.sucursalFolderId) fd.append('parentFolderId', state.sucursalFolderId);
 
@@ -808,13 +376,11 @@ async function subirDrive() {
     const data = await r.json();
     if (!data.ok) return showErr('err-step2', data.error);
 
-    state.driveFolderId = data.folderId || null;
     document.getElementById('drive-result').style.display='block';
     document.getElementById('drive-sub').textContent = `Carpeta: ${data.carpeta} (${data.archivos.length} archivos subidos)`;
     const link=document.getElementById('drive-link'); link.href=data.folderLink;
     state.driveOk=true;
-    const btnNext2 = document.getElementById('btn-next2');
-    if (btnNext2) btnNext2.disabled=false;
+    document.getElementById('btn-next2').disabled=false;
     
     // Capturar enlace del PDF de factura
     const pdfArchivo = data.archivos ? data.archivos.find(a => a.tipo === 'PDF') : null;
@@ -829,451 +395,39 @@ async function subirDrive() {
   }
 }
 
-// ── PASO 4: Nube 1 — Buzón Autotec (buzonfecg.aspx) + Bandeja en Vivo de Confirmación ─
-async function checkBridgeStatus() {
-  const pill = document.getElementById('bridge-status-pill');
-  if (!pill) return;
-  try {
-    const r = await fetch('/api/autotec/bridge/status');
-    const data = await r.json();
-    if (data.ok && data.online) {
-      pill.textContent = `🟢 Puente 24/7 Conectado (${data.hostname || 'México'})`;
-      pill.style.background = '#dcfce7';
-      pill.style.color = '#166534';
-    } else {
-      pill.textContent = '🟡 Puente 24/7 en espera (iniciando...)';
-      pill.style.background = '#fef3c7';
-      pill.style.color = '#92400e';
-    }
-  } catch (e) {}
-}
-
-async function cargarBandejaConfirmacionesNube1(manual = false) {
-  const listEl = document.getElementById('nube1-bandeja-list');
-  if (!listEl) return [];
-  if (manual) {
-    listEl.innerHTML = `<div style="text-align:center; padding:18px; color:#0284c7; font-size:12.5px; font-weight:700;">🔄 Buscando correos recientes de notifica@gfarrera.com.mx en toyotachiapas30@gmail.com...</div>`;
-  }
-
-  try {
-    const params = new URLSearchParams({
-      folio: state.cfdi?.noFactura || '',
-      uuid: state.cfdi?.uuid || '',
-      rfcEmisor: state.cfdi?.rfcEmisor || '',
-      nombreEmisor: state.cfdi?.nombreEmisor || ''
-    });
-    const r = await fetch(`/api/autotec/bandeja-confirmaciones?${params.toString()}`);
-    const data = await r.json();
-    if (!data.ok) {
-      listEl.innerHTML = `<div style="text-align:center; padding:16px; color:#dc2626; font-size:12.5px;">⚠️ ${data.error || 'No se pudo consultar la bandeja.'}</div>`;
-      return [];
-    }
-
-    const emails = data.emails || [];
-    if (emails.length === 0) {
-      listEl.innerHTML = `<div style="text-align:center; padding:18px; color:#64748b; font-size:12.5px;">📭 Aún no hay correos de <code>notifica@gfarrera.com.mx</code> en <strong>toyotachiapas30@gmail.com</strong>. Cuando envíes una factura al Buzón con el correo <code>toyotachiapas30@gmail.com</code>, aparecerá aquí en segundos.</div>`;
-      return [];
-    }
-
-    listEl.innerHTML = emails.map(m => {
-      const borderCol = m.matched ? '#16a34a' : '#e2e8f0';
-      const bgCol = m.matched ? '#f0fdf4' : '#ffffff';
-      const badgeHtml = m.matched
-        ? `<span style="font-size:10.5px; padding:2px 8px; border-radius:999px; background:#16a34a; color:#fff; font-weight:800;">🎯 Coincide con esta factura</span>`
-        : `<span style="font-size:10.5px; padding:2px 8px; border-radius:999px; background:#e2e8f0; color:#475569; font-weight:700;">Recibido</span>`;
-
-      return `
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 14px; background:${bgCol}; border:1.5px solid ${borderCol}; border-radius:10px;">
-          <div style="flex:1; min-width:220px;">
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-              <strong style="font-size:13px; color:#0f172a;">📧 ${m.subject || 'Factura electrónica registrada'}</strong>
-              ${badgeHtml}
-            </div>
-            <div style="font-size:11.5px; color:#475569; margin-top:3px;">${m.snippet || ''}</div>
-            <div style="font-size:11px; color:#64748b; margin-top:2px;">🕒 ${m.date || ''} · De: ${m.from || 'notifica@gfarrera.com.mx'}</div>
-          </div>
-          <div>
-            <button class="btn btn-primary" onclick="capturarCorreoConfirmacionBuzon('${m.id}')" style="background:#16a34a; border-color:#16a34a; padding:7px 12px; font-size:12px; font-weight:700; white-space:nowrap;">
-              📄 Usar este Comprobante (Generar PDF)
-            </button>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    return emails;
-  } catch (err) {
-    listEl.innerHTML = `<div style="text-align:center; padding:16px; color:#dc2626; font-size:12.5px;">⚠️ Error al consultar bandeja: ${err.message}</div>`;
-    return [];
-  }
-}
-
-async function subirBuzon(soloValidar = false) {
+// ── PASO 4: Autotec Buzón ─────────────────────────────────────────────────────
+async function subirBuzon() {
   hideErr('err-step3');
-  if (!state.xmlFile) return showErr('err-step3', 'Carga primero el archivo XML en el Paso 1.');
-  const btn = document.getElementById('btn-buzon');
-  const origHtml = btn ? btn.innerHTML : '';
   setLoading('btn-buzon','spin-buzon',true);
-
   const fd = new FormData();
   fd.append('xml', state.xmlFile);
-  if (state.pdfFile) fd.append('pdf', state.pdfFile);
-
-  const nombre = document.getElementById('inp-buzon-nombre')?.value?.trim() || 'YONI JAVIER RUIZ DOMINGUEZ';
-  const telefono = document.getElementById('inp-buzon-telefono')?.value?.trim() || '8718645133';
-  const correo = document.getElementById('inp-buzon-correo')?.value?.trim() || 'toyotachiapas30@gmail.com';
-  const ordenCompra = document.getElementById('inp-orden-compra')?.value?.trim() || '';
-
-  fd.append('nombre', nombre);
-  fd.append('telefono', telefono);
-  fd.append('correo', correo);
+  // Add optional orden de compra
+  const ordenCompra = document.getElementById('inp-orden-compra').value.trim();
   if (ordenCompra) fd.append('ordenCompra', ordenCompra);
-  if (soloValidar) fd.append('soloValidar', 'true');
-  fd.append('asyncJob', 'true');
 
   try {
     const r = await fetch('/api/autotec/buzon', { method:'POST', body:fd });
-    const rawText = await r.text();
-    let startData;
-    try {
-      startData = JSON.parse(rawText);
-    } catch (parseErr) {
-      throw new Error('El servidor se está actualizando (espera 20 segundos y vuelve a dar clic).');
-    }
-    if (!startData.ok) return showErr('err-step3', startData.error);
-
-    let data = startData;
-    if (startData.asyncJob && startData.jobId) {
-      for (let i = 0; i < 65; i++) {
-        await new Promise(res => setTimeout(res, 2000));
-        const stRes = await fetch(`/api/autotec/buzon-status/${startData.jobId}`);
-        const stText = await stRes.text();
-        let stData;
-        try { stData = JSON.parse(stText); } catch (e) { continue; }
-        if (!stData.ok) throw new Error(stData.error || 'Error consultando estado del Buzón.');
-        if (btn && stData.step) {
-          btn.innerHTML = `<span class="spinner" style="display:inline-block"></span> ${stData.step}`;
-        }
-        if (stData.status === 'done') {
-          data = stData.result;
-          break;
-        }
-        if (stData.status === 'error') {
-          throw new Error(stData.error || 'Error en Buzón Autotec.');
-        }
-      }
-    }
-
-    if (!data || !data.ok) return showErr('err-step3', data?.error || 'Tiempo de espera agotado en Buzón Autotec.');
-
+    const data = await r.json();
+    if (!data.ok) return showErr('err-step3', data.error);
     document.getElementById('buzon-result').style.display='block';
-    const subEl = document.getElementById('buzon-result-sub');
-    if (subEl) {
-      subEl.textContent = [data.mensaje, data.aviso, data.mensajePortal].filter(Boolean).join(' · ');
-    }
-
+    if (data.screenshot) document.getElementById('buzon-screenshot').src=data.screenshot;
     state.buzonOk=true;
+    document.getElementById('btn-next3').disabled=false;
+    // Debounce sheet search since we have the provider name now
     buscarSheetPorNombre();
-
-    // Actualizar automáticamente la Bandeja en Vivo y capturar el correo de confirmación apenas llegue
-    setTimeout(async () => {
-      const emails = await cargarBandejaConfirmacionesNube1(true);
-      const match = emails.find(e => e.matched);
-      if (match && !state.evidencias?.correoBuzon) {
-        capturarCorreoConfirmacionBuzon(match.id);
-      } else {
-        setTimeout(async () => {
-          const emails2 = await cargarBandejaConfirmacionesNube1(false);
-          const match2 = emails2.find(e => e.matched);
-          if (match2 && !state.evidencias?.correoBuzon) {
-            capturarCorreoConfirmacionBuzon(match2.id);
-          }
-        }, 5000);
-      }
-    }, 3500);
   } catch(err) {
-    showErr('err-step3','Error en Buzón Autotec: '+err.message);
+    showErr('err-step3','Error: '+err.message);
   } finally {
-    if (btn && origHtml) btn.innerHTML = origHtml;
     setLoading('btn-buzon','spin-buzon',false);
   }
 }
 
-async function capturarCorreoConfirmacionBuzon(specificMessageId = '') {
-  hideErr('err-step3');
-  const btn = document.getElementById('btn-buzon-correo');
-  const origHtml = btn ? btn.innerHTML : '';
-  setLoading('btn-buzon-correo', 'spin-buzon-correo', true);
+// Pasos eliminados
+function buscarCorreo() {}
+function imprimirCorreo() {}
+function enviarPortal() {}
 
-  try {
-    const r = await fetch('/api/autotec/correo-confirmacion', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messageId: specificMessageId || '',
-        folio: state.cfdi?.noFactura || '',
-        uuid: state.cfdi?.uuid || '',
-        rfcEmisor: state.cfdi?.rfcEmisor || '',
-        nombreEmisor: state.cfdi?.nombreEmisor || '',
-        asyncJob: true
-      })
-    });
-    const rawText = await r.text();
-    let startData;
-    try {
-      startData = JSON.parse(rawText);
-    } catch (e) {
-      throw new Error('El servidor se está iniciando. Espera 15 segundos y vuelve a dar clic.');
-    }
-    if (!startData.ok && !startData.asyncJob) {
-      return showErr('err-step3', startData.error || 'No se encontró el correo de confirmación aún.');
-    }
-
-    let data = startData;
-    if (startData.asyncJob && startData.jobId) {
-      for (let i = 0; i < 40; i++) {
-        await new Promise(res => setTimeout(res, 2000));
-        const stRes = await fetch(`/api/autotec/buzon-status/${startData.jobId}`);
-        const stText = await stRes.text();
-        let stData;
-        try { stData = JSON.parse(stText); } catch (e) { continue; }
-        if (!stData.ok) throw new Error(stData.error || 'Error consultando correo.');
-        if (btn && stData.step) {
-          btn.innerHTML = `<span class="spinner" style="display:inline-block"></span> ${stData.step}`;
-        }
-        if (stData.status === 'done') {
-          data = stData.result;
-          break;
-        }
-        if (stData.status === 'error') {
-          throw new Error(stData.error || 'Error generando PDF del correo.');
-        }
-      }
-    }
-
-    if (!data || !data.ok) {
-      return showErr('err-step3', data?.error || 'No se encontró el correo de confirmación aún.');
-    }
-
-    const box = document.getElementById('buzon-mail-result');
-    const img = document.getElementById('buzon-mail-screenshot');
-    const sub = document.getElementById('buzon-mail-sub');
-    if (box) box.style.display = 'block';
-    if (img && data.screenshot) img.src = data.screenshot;
-    if (sub) sub.textContent = `${data.subject || 'Factura electrónica registrada'} · ${data.date || ''} · Subido a Drive y listo para unir al Expediente`;
-
-    if (data.pdfBase64) {
-      const blob = b64ToBlob(data.pdfBase64, 'application/pdf');
-      const fileName = `Correo_Confirmacion_Nube1_${getFolioSafe()}.pdf`;
-      state.evidencias.correoBuzon = { blob, fileName };
-      subirPdfEvidenciaADrive(blob, fileName);
-      if (typeof renderChecklistExpediente === 'function') renderChecklistExpediente();
-    }
-  } catch (err) {
-    showErr('err-step3', 'Error generando PDF del correo: ' + err.message);
-  } finally {
-    if (btn && origHtml) btn.innerHTML = origHtml;
-    setLoading('btn-buzon-correo', 'spin-buzon-correo', false);
-  }
-}
-
-// ── PASO 5: Nube 2 — Portal EnvioFacturasGastos ───────────────────────────────
-async function checkPortalConfig() {
-  try {
-    const r = await fetch('/api/portal/config');
-    const data = await r.json();
-    const badge = document.getElementById('portal-auth-badge');
-    if (!badge) return;
-    if (data.ok && data.configured) {
-      badge.textContent = `🟢 Usuario: ${data.user} (Valor Farrera)`;
-      badge.style.background = '#dcfce7';
-      badge.style.color = '#166534';
-      const uInp = document.getElementById('inp-portal-user');
-      if (uInp && !uInp.value) uInp.value = data.user;
-    } else {
-      badge.textContent = '⚠️ Falta configurar usuario Autotec';
-      badge.style.background = '#fef3c7';
-      badge.style.color = '#92400e';
-      const box = document.getElementById('portal-config-box');
-      if (box) box.style.display = 'block';
-    }
-  } catch (e) {}
-}
-
-function togglePortalConfigBox() {
-  const box = document.getElementById('portal-config-box');
-  if (!box) return;
-  box.style.display = box.style.display === 'none' ? 'block' : 'none';
-}
-
-async function guardarCredencialesPortal() {
-  const user = document.getElementById('inp-portal-user')?.value?.trim() || '';
-  const pass = document.getElementById('inp-portal-pass')?.value?.trim() || '';
-  const msg = document.getElementById('portal-config-msg');
-  if (!user || !pass) {
-    if (msg) {
-      msg.style.display = 'block';
-      msg.style.color = '#dc2626';
-      msg.textContent = '⚠️ Escribe tu usuario y contraseña de Autotec.';
-    }
-    return;
-  }
-
-  if (msg) {
-    msg.style.display = 'block';
-    msg.style.color = '#475569';
-    msg.textContent = '⏳ Guardando credenciales de Autotec...';
-  }
-
-  try {
-    const r = await fetch('/api/portal/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user, pass, empresa: '29' })
-    });
-    const data = await r.json();
-    if (!data.ok) throw new Error(data.error || 'Error guardando acceso');
-
-    document.getElementById('inp-portal-pass').value = '';
-    if (msg) {
-      msg.style.color = '#15803d';
-      msg.textContent = `✅ Credenciales de ${data.user} guardadas permanentemente.`;
-    }
-    await checkPortalConfig();
-    setTimeout(() => {
-      const box = document.getElementById('portal-config-box');
-      if (box) box.style.display = 'none';
-    }, 1500);
-  } catch (err) {
-    if (msg) {
-      msg.style.color = '#dc2626';
-      msg.textContent = '❌ ' + err.message;
-    }
-  }
-}
-
-async function ejecutarPortalNube2(soloPrevisualizar = false) {
-  hideErr('err-step4');
-  const btnId = soloPrevisualizar ? 'btn-portal-preview' : 'btn-portal-send';
-  const spinId = soloPrevisualizar ? 'spin-portal-prev' : 'spin-portal-send';
-  const btn = document.getElementById(btnId);
-  const origHtml = btn ? btn.innerHTML : '';
-  setLoading(btnId, spinId, true);
-
-  try {
-    const r = await fetch('/api/portal/enviar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uuid: state.cfdi?.uuid || '',
-        rfcEmisor: state.cfdi?.rfcEmisor || '',
-        noFactura: state.cfdi?.noFactura || '',
-        total: state.cfdi?.total || '',
-        soloPrevisualizar,
-        asyncJob: true
-      })
-    });
-    const rawText = await r.text();
-    let startData;
-    try {
-      startData = JSON.parse(rawText);
-    } catch (parseErr) {
-      throw new Error('El servidor se está actualizando (espera 20 segundos y vuelve a dar clic).');
-    }
-
-    if (!startData.ok) {
-      if (startData.needsCredentials) {
-        const box = document.getElementById('portal-config-box');
-        if (box) box.style.display = 'block';
-      }
-      return showErr('err-step4', startData.error || 'Error en EnvioFacturasGastos.');
-    }
-
-    let data = startData;
-    if (startData.asyncJob && startData.jobId) {
-      for (let i = 0; i < 50; i++) {
-        await new Promise(res => setTimeout(res, 2500));
-        const stRes = await fetch(`/api/portal/status/${startData.jobId}`);
-        const stText = await stRes.text();
-        let stData;
-        try { stData = JSON.parse(stText); } catch (e) { continue; }
-        if (!stData.ok) throw new Error(stData.error || 'Error consultando estado de Nube 2.');
-        if (btn && stData.step) {
-          btn.innerHTML = `<span class="spinner" style="display:inline-block"></span> ${stData.step}`;
-        }
-        if (stData.status === 'done') {
-          data = stData.result;
-          break;
-        }
-        if (stData.status === 'error') {
-          throw new Error(stData.error || 'Error en EnvioFacturasGastos.');
-        }
-      }
-    }
-
-    if (!data || !data.ok) return showErr('err-step4', data?.error || 'Tiempo agotado en EnvioFacturasGastos.');
-
-    const resBox = document.getElementById('portal-result');
-    const imgEl = document.getElementById('portal-screenshot');
-    const titleEl = document.getElementById('portal-result-title');
-    const subEl = document.getElementById('portal-result-sub');
-
-    if (resBox) resBox.style.display = 'block';
-    if (imgEl && data.screenshot) imgEl.src = data.screenshot;
-    if (titleEl) {
-      titleEl.textContent = data.enviado
-        ? '✅ Factura Enviada y Capturada en EnvioFacturasGastos (Nube 2)'
-        : '👁️ Previsualización de Selección en EnvioFacturasGastos';
-    }
-    if (subEl) {
-      subEl.textContent = data.mensaje || '';
-    }
-
-    if (data.pdfBase64) {
-      const blob = b64ToBlob(data.pdfBase64, 'application/pdf');
-      const fileName = `EnvioFacturasGastos_Nube2_${getFolioSafe()}.pdf`;
-      state.evidencias.portal = { blob, fileName };
-      if (data.enviado) {
-        subirPdfEvidenciaADrive(blob, fileName);
-      }
-    }
-    state.portalOk = Boolean(data.enviado);
-  } catch (err) {
-    showErr('err-step4', 'Error conectando con EnvioFacturasGastos: ' + err.message);
-  } finally {
-    if (btn && origHtml) btn.innerHTML = origHtml;
-    setLoading(btnId, spinId, false);
-  }
-}
-
-// ── PASO 6: Contrarecibo Google Sheets + Banxico USD ─────────────────────────
-async function consultarBanxicoFIX() {
-  hideErr('err-step6');
-  setLoading('btn-banxico-fix', 'spin-banxico', true);
-  const box = document.getElementById('banxico-box');
-  if (box) box.style.display = 'block';
-
-  try {
-    const r = await fetch('/api/sheets/banxico-fix');
-    const data = await r.json();
-    if (!data.ok) return showErr('err-step6', data.error || 'Error consultando Banxico.');
-
-    const inp = document.getElementById('inp-tipo-cambio');
-    if (inp && data.tipoCambioFix) {
-      inp.value = data.tipoCambioFix;
-    }
-    if (data.pdfBase64) {
-      const blob = b64ToBlob(data.pdfBase64, 'application/pdf');
-      const fileName = `Tipo_Cambio_Banxico_FIX_${getFolioSafe()}.pdf`;
-      state.evidencias.banxico = { blob, fileName };
-      subirPdfEvidenciaADrive(blob, fileName);
-    }
-  } catch (err) {
-    showErr('err-step6', 'Error al consultar Banxico: ' + err.message);
-  } finally {
-    setLoading('btn-banxico-fix', 'spin-banxico', false);
-  }
-}
+// ── PASO 7: Contrarecibo Google Sheets ──────────────────────────────────────
 
 // Debounce for provider name search
 let sheetSearchTimer = null;
@@ -1289,7 +443,7 @@ async function buscarSheetPorNombre() {
 
   if (!nombre) {
     statusEl.textContent = '';
-    loadSheets();
+    loadSheets(); // Si se vacía el buscador, cargar de nuevo todos los proveedores
     return;
   }
 
@@ -1310,6 +464,7 @@ async function buscarSheetPorNombre() {
       return;
     }
 
+    // Clear and repopulate dropdown
     sel.innerHTML = '<option value="">— Selecciona la hoja —</option>';
     data.sheets.forEach(s => {
       const o = document.createElement('option');
@@ -1319,10 +474,12 @@ async function buscarSheetPorNombre() {
     });
 
     if (data.matched && data.sheets.length > 0) {
+      // Auto-select the first match
       sel.value = data.sheets[0].id;
       state.selectedSheetId = data.sheets[0].id;
       statusEl.textContent = `✅ Encontrada: "${data.sheets[0].name}"`;
       statusEl.style.color = '#6ee7b7';
+      // Auto-trigger preview
       setTimeout(previewSheet, 100);
     } else if (data.sheets.length > 0) {
       statusEl.textContent = data.mensaje || `⚠️ No se encontró coincidencia exacta. Mostrando ${data.sheets.length} hojas.`;
@@ -1344,11 +501,13 @@ async function loadSheets() {
     const prefix = sucursalName.includes('Poniente') ? 'PTE' : 'MATRIZ';
     
     let queryUrl = `/api/sheets/find?prefix=${prefix}`;
+    console.log(`📡 Solicitando hojas para prefijo sucursal: ${prefix}`);
     const r = await fetch(queryUrl);
     const data = await r.json();
     if (!data.ok || !data.sheets) return;
     const sel = document.getElementById('sel-sheet');
     
+    // Always refresh the dropdown content
     sel.innerHTML = '<option value="">— Selecciona la hoja —</option>';
     data.sheets.forEach(s => {
       const o = document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o);
@@ -1381,7 +540,6 @@ async function llenarSheet() {
   const sheetId  = document.getElementById('sel-sheet').value;
   const tabName  = document.getElementById('inp-tab').value.trim() || 'Hoja1';
   const concepto = document.getElementById('inp-concepto').value.trim();
-  const tipoCambio = document.getElementById('inp-tipo-cambio')?.value?.trim() || '';
   setLoading('btn-sheets-fill','spin-sheets',true);
 
   try {
@@ -1392,9 +550,6 @@ async function llenarSheet() {
         noFact:  state.cfdi.noFactura || state.cfdi.uuid,
         fecha:   state.cfdi.fecha,
         importe: state.cfdi.total,
-        moneda:  state.cfdi.moneda || 'MXN',
-        tipoCambio: tipoCambio ? parseFloat(tipoCambio) : null,
-        proveedorNombre: state.cfdi.nombreEmisor || '',
         concepto
       })
     });
@@ -1402,26 +557,7 @@ async function llenarSheet() {
     if (!data.ok) return showErr('err-step6', data.error);
 
     document.getElementById('sheets-result').style.display='block';
-    document.getElementById('sheets-link-wrap').innerHTML=`<a href="${data.sheetUrl}" target="_blank" style="color:#15803d;font-weight:700;">Abrir Hoja del Proveedor en Google Sheets ↗</a> · Fecha S6: ${data.fechaElaboracion || ''} · Formato: ${data.formatoAplicado || 'ESTANDAR'}`;
-
-    if (data.pdfBase64) {
-      const blob = b64ToBlob(data.pdfBase64, 'application/pdf');
-      const fileName = `Contrarecibo_${getFolioSafe()}.pdf`;
-      state.evidencias.contrarecibo = { blob, fileName };
-      subirPdfEvidenciaADrive(blob, fileName);
-
-      const btnDl = document.getElementById('btn-dl-contrarecibo');
-      const btnPr = document.getElementById('btn-print-contrarecibo');
-      if (btnDl) btnDl.style.display = 'inline-flex';
-      if (btnPr) btnPr.style.display = 'inline-flex';
-    }
-
-    if (typeof renderChecklistExpediente === 'function') renderChecklistExpediente();
-
-    // Auto-unir todos los PDFs en 1 solo Expediente y subirlo a Drive
-    if (typeof construirExpedienteUnidoBlob === 'function') {
-      construirExpedienteUnidoBlob(true).catch(() => {});
-    }
+    document.getElementById('sheets-link-wrap').innerHTML=`<a href="${data.sheetUrl}" target="_blank" style="color:#60a5fa">Abrir Google Sheets ↗</a>`;
 
     // Auto-register as expense
     const categoria = document.getElementById('inp-categoria').value || 'OTROS';
@@ -1433,126 +569,6 @@ async function llenarSheet() {
     showErr('err-step6','Error: '+err.message);
   } finally {
     setLoading('btn-sheets-fill','spin-sheets',false);
-  }
-}
-
-// ── UNIÓN DE TODOS LOS PDFS EN 1 SOLO EXPEDIENTE COMPLETO ────────────────────
-function getExpedientePartsList() {
-  const isUsd = state.cfdi && (String(state.cfdi.moneda).toUpperCase() === 'USD' || Boolean(state.evidencias?.banxico?.blob));
-  const parts = [
-    { key: 'contrarecibo', label: '1. Contrarecibo (1 Hoja)', blob: state.evidencias?.contrarecibo?.blob || null },
-    { key: 'factura',      label: '2. Factura PDF',           blob: state.pdfFile || null },
-    { key: 'sat',          label: '3. Validación SAT',        blob: state.satPdfBlob || null }
-  ];
-  if (isUsd) {
-    parts.push({ key: 'banxico', label: '4. Tipo Cambio Banxico FIX', blob: state.evidencias?.banxico?.blob || null });
-  }
-  parts.push(
-    { key: 'correoBuzon',  label: `${isUsd ? '5' : '4'}. Correo Confirmación Nube 1`, blob: state.evidencias?.correoBuzon?.blob || null },
-    { key: 'portal',       label: `${isUsd ? '6' : '5'}. Comprobante Nube 2`,         blob: state.evidencias?.portal?.blob || null }
-  );
-  return parts;
-}
-
-function renderChecklistExpediente() {
-  const wrap = document.getElementById('expediente-parts-checklist');
-  if (!wrap) return;
-  const parts = getExpedientePartsList();
-  wrap.innerHTML = parts.map(p => {
-    const ok = Boolean(p.blob);
-    const bg = ok ? '#dcfce7' : '#f1f5f9';
-    const col = ok ? '#166534' : '#64748b';
-    const border = ok ? '#86efac' : '#cbd5e1';
-    return `<span style="padding:4px 10px; border-radius:999px; background:${bg}; color:${col}; border:1px solid ${border}; font-weight:700;">${ok ? '✅' : '⚪'} ${p.label}</span>`;
-  }).join('');
-}
-
-async function construirExpedienteUnidoBlob(subirADrive = true) {
-  if (!window.PDFLib || !window.PDFLib.PDFDocument) {
-    throw new Error('La librería PDFLib aún está cargando. Intenta de nuevo en 2 segundos.');
-  }
-  const parts = getExpedientePartsList().filter(p => Boolean(p.blob));
-  if (parts.length === 0) {
-    throw new Error('Aún no hay archivos PDF generados en este flujo para unir.');
-  }
-
-  const mergedPdf = await window.PDFLib.PDFDocument.create();
-  let includedCount = 0;
-
-  for (const part of parts) {
-    try {
-      const ab = await part.blob.arrayBuffer();
-      const srcDoc = await window.PDFLib.PDFDocument.load(ab, { ignoreEncryption: true });
-      const copiedPages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices());
-      copiedPages.forEach(page => mergedPdf.addPage(page));
-      includedCount++;
-    } catch (partErr) {
-      console.warn(`Aviso al unir ${part.label}:`, partErr.message);
-    }
-  }
-
-  if (includedCount === 0) {
-    throw new Error('No se pudieron leer las páginas de los archivos PDF.');
-  }
-
-  const mergedBytes = await mergedPdf.save();
-  const mergedBlob = new Blob([mergedBytes], { type: 'application/pdf' });
-  const provSafe = (document.getElementById('inp-proveedor')?.value?.trim() || state.cfdi?.nombreEmisor || 'Proveedor')
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .slice(0, 35);
-  const fileName = `Expediente_Completo_${provSafe}_${getFolioSafe()}.pdf`;
-
-  state.evidencias.expedienteUnido = { blob: mergedBlob, fileName };
-
-  const statusEl = document.getElementById('expediente-unido-status');
-  if (statusEl) {
-    statusEl.innerHTML = `✅ <strong>Expediente Unido Listo (${includedCount} documentos en 1 solo PDF):</strong> <code>${fileName}</code>`;
-  }
-
-  if (subirADrive) {
-    subirPdfEvidenciaADrive(mergedBlob, fileName);
-  }
-
-  return { blob: mergedBlob, fileName, includedCount };
-}
-
-async function unirYDescargarExpedienteCompleto(imprimir = false) {
-  hideErr('err-step6');
-  const btnId = imprimir ? 'btn-print-expediente' : 'btn-merge-expediente';
-  const btn = document.getElementById(btnId);
-  const origText = btn ? btn.innerHTML : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '⏳ Uniendo PDFs en 1 solo archivo...';
-  }
-
-  try {
-    const { blob, fileName } = await construirExpedienteUnidoBlob(true);
-    const url = URL.createObjectURL(blob);
-
-    if (imprimir) {
-      const win = window.open(url, '_blank');
-      if (win) {
-        win.addEventListener('load', () => {
-          try { win.print(); } catch (e) {}
-        });
-      }
-    } else {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 8000);
-    }
-  } catch (err) {
-    showErr('err-step6', 'Error al unir el expediente PDF: ' + err.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = origText;
-    }
   }
 }
 

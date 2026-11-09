@@ -658,6 +658,12 @@ async function backupDatabaseToDrive() {
       return;
     }
 
+    // Sincronizar también en tiempo real con la Hoja Maestra de Google Sheets en la carpeta Antigravity
+    try {
+      const { scheduleMasterSheetSync } = require('../utils/sheets-db');
+      scheduleMasterSheetSync(db);
+    } catch (e) {}
+
     // Generar snapshot consistente y seguro mediante la API nativa de SQLite backup
     await db.backup(backupTempPath);
 

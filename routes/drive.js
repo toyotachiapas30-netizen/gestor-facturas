@@ -194,9 +194,9 @@ router.get('/status', (req, res) => {
   res.json({ ok: true, authorized: isAuth });
 });
 
-// ── POST /api/drive/upload  →  Upload XML + PDF (+ optional SAT PDF) to Drive ───
-// Body: multipart form with fields xml, pdf, satPdf, proveedorNombre
-router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 'satPdf' }]), async (req, res) => {
+// ── POST /api/drive/upload  →  Upload XML + PDF to Drive ───
+// Body: multipart form with fields xml, pdf, proveedorNombre
+router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }]), async (req, res) => {
   const client = getAuthorizedClient();
   if (!client) return res.status(401).json({ ok: false, error: 'No autorizado con Google. Ve a Configuración.' });
 
@@ -208,9 +208,8 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 
 
   try {
     // 1. Search or create subfolder with provider name
-    const safeName = proveedorNombre.replace(/'/g, "\\'");
     const searchRes = await drive.files.list({
-      q: `'${rootFolderId}' in parents and name='${safeName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      q: `'${rootFolderId}' in parents and name='${proveedorNombre}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       fields: 'files(id, name)'
     });
 
@@ -226,101 +225,35 @@ router.post('/upload', upload.fields([{ name: 'xml' }, { name: 'pdf' }, { name: 
       folderId = newFolder.data.id;
     }
 
-    const tasks = [];
+    const uploaded = [];
 
-    // 2. Upload XML, PDF, and SAT_PDF in parallel for fast response
-    if (req.files && req.files['xml'] && req.files['xml'][0]) {
+    // 2. Upload XML
+    if (req.files['xml']) {
       const xmlFile = req.files['xml'][0];
-      tasks.push(
-        drive.files.create({
-          requestBody: { name: xmlFile.originalname, parents: [folderId] },
-          media: { mimeType: 'application/xml', body: require('stream').Readable.from(xmlFile.buffer) },
-          fields: 'id, name, webViewLink'
-        }).then(r => ({ tipo: 'XML', nombre: r.data.name, link: r.data.webViewLink }))
-      );
+      const xmlRes = await drive.files.create({
+        requestBody: { name: xmlFile.originalname, parents: [folderId] },
+        media: { mimeType: 'application/xml', body: require('stream').Readable.from(xmlFile.buffer) },
+        fields: 'id, name, webViewLink'
+      });
+      uploaded.push({ tipo: 'XML', nombre: xmlRes.data.name, link: xmlRes.data.webViewLink });
     }
 
-    if (req.files && req.files['pdf'] && req.files['pdf'][0]) {
+    // 3. Upload PDF
+    if (req.files['pdf']) {
       const pdfFile = req.files['pdf'][0];
-      tasks.push(
-        drive.files.create({
-          requestBody: { name: pdfFile.originalname, parents: [folderId] },
-          media: { mimeType: 'application/pdf', body: require('stream').Readable.from(pdfFile.buffer) },
-          fields: 'id, name, webViewLink'
-        }).then(r => ({ tipo: 'PDF', nombre: r.data.name, link: r.data.webViewLink }))
-      );
+      const pdfRes = await drive.files.create({
+        requestBody: { name: pdfFile.originalname, parents: [folderId] },
+        media: { mimeType: 'application/pdf', body: require('stream').Readable.from(pdfFile.buffer) },
+        fields: 'id, name, webViewLink'
+      });
+      uploaded.push({ tipo: 'PDF', nombre: pdfRes.data.name, link: pdfRes.data.webViewLink });
     }
-
-    if (req.files && req.files['satPdf'] && req.files['satPdf'][0]) {
-      const satFile = req.files['satPdf'][0];
-      tasks.push(
-        drive.files.create({
-          requestBody: { name: satFile.originalname, parents: [folderId] },
-          media: { mimeType: 'application/pdf', body: require('stream').Readable.from(satFile.buffer) },
-          fields: 'id, name, webViewLink'
-        }).then(r => ({ tipo: 'SAT_PDF', nombre: r.data.name, link: r.data.webViewLink }))
-      );
-    }
-
-    const uploaded = await Promise.all(tasks);
 
     const folderLink = `https://drive.google.com/drive/folders/${folderId}`;
     return res.json({ ok: true, carpeta: proveedorNombre, folderId, folderLink, archivos: uploaded });
 
   } catch (err) {
     console.error('Drive error:', err.message);
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// ── POST /api/drive/upload-extra  →  Sube PDF de evidencia (Nube 1, Nube 2, Contrarecibo, Banxico) a la carpeta del proveedor ──
-router.post('/upload-extra', upload.single('file'), async (req, res) => {
-  const client = getAuthorizedClient();
-  if (!client) return res.status(401).json({ ok: false, error: 'No autorizado con Google.' });
-
-  const { folderId, proveedorNombre, parentFolderId, customName } = req.body || {};
-  const file = req.file;
-  if (!file) return res.status(400).json({ ok: false, error: 'Falta el archivo a subir.' });
-
-  const drive = getGoogle().drive({ version: 'v3', auth: client });
-
-  try {
-    let targetFolderId = folderId;
-    if (!targetFolderId && proveedorNombre) {
-      const rootFolderId = parentFolderId || process.env.GOOGLE_DRIVE_FOLDER_ID;
-      const searchRes = await drive.files.list({
-        q: `'${rootFolderId}' in parents and name='${proveedorNombre.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-        fields: 'files(id, name)'
-      });
-      if (searchRes.data.files.length > 0) {
-        targetFolderId = searchRes.data.files[0].id;
-      } else {
-        const newFolder = await drive.files.create({
-          requestBody: { name: proveedorNombre, mimeType: 'application/vnd.google-apps.folder', parents: [rootFolderId] },
-          fields: 'id'
-        });
-        targetFolderId = newFolder.data.id;
-      }
-    }
-
-    if (!targetFolderId) {
-      return res.status(400).json({ ok: false, error: 'No se especificó carpeta destino en Drive.' });
-    }
-
-    const fileName = customName || file.originalname;
-    const upRes = await drive.files.create({
-      requestBody: { name: fileName, parents: [targetFolderId] },
-      media: { mimeType: file.mimetype || 'application/pdf', body: require('stream').Readable.from(file.buffer) },
-      fields: 'id, name, webViewLink'
-    });
-
-    return res.json({
-      ok: true,
-      folderId: targetFolderId,
-      file: { id: upRes.data.id, nombre: upRes.data.name, link: upRes.data.webViewLink }
-    });
-  } catch (err) {
-    console.error('Drive upload-extra error:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

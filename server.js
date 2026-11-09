@@ -39,14 +39,6 @@ function gestorAuth(req, res, next) {
   if (p.startsWith('/takata') || p.startsWith('/api/takata')) {
     return next();
   }
-
-  // Permitir Puente 24/7 (Windows / Mac en México) hacia Buzón Autotec
-  if (p.startsWith('/api/autotec/bridge/')) {
-    const bridgeKey = req.headers['x-bridge-key'] || req.query?.key;
-    if (bridgeKey === (process.env.BRIDGE_SECRET || 'toyoter_bridge_2026')) {
-      return next();
-    }
-  }
   
   // Recursos permitidos sin iniciar sesión
   const allowed = [
@@ -389,8 +381,6 @@ async function startServer() {
     console.log(`\n✅ SERVIDOR ACTUALIZADO`);
     console.log(`🚀 Corriendo en puerto: ${PORT}`);
   });
-
-  // Evitar cierres prematuros de socket (502 / "Unexpected end of JSON input") detrás del proxy de Render/Cloudflare/Vercel
   server.keepAliveTimeout = 120000;
   server.headersTimeout = 125000;
 
@@ -409,6 +399,13 @@ async function startServer() {
   } catch (err) {
     console.error('⚠️ Error al iniciar restauración de tokens:', err.message);
   }
+
+  // 2.5 Sincronizar con la Hoja Maestra de Google Sheets en la carpeta Antigravity
+  try {
+    const { getDB } = require('./routes/gastos');
+    const { syncAllToMasterSheet } = require('./utils/sheets-db');
+    syncAllToMasterSheet(getDB()).catch(() => {});
+  } catch (err) {}
 
   // 3. Auto-Ping Keep-Alive externo cada 9 minutos para evitar reposo en Render
   const publicUrl = process.env.RENDER_EXTERNAL_URL || 'https://gestor-facturas-hrwq.onrender.com';
@@ -434,9 +431,3 @@ async function handleShutdown(signal) {
 
 process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 process.on('SIGINT', () => handleShutdown('SIGINT'));
-process.on('unhandledRejection', (reason) => {
-  console.warn('⚠️ [UnhandledRejection ignorado para mantener servidor activo]:', reason?.message || reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('⚠️ [UncaughtException capturado]:', err?.message || err);
-});
