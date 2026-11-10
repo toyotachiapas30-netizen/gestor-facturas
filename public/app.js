@@ -558,7 +558,19 @@ async function llenarSheet() {
     if (!data.ok) return showErr('err-step6', data.error);
 
     document.getElementById('sheets-result').style.display='block';
-    document.getElementById('sheets-link-wrap').innerHTML=`<a href="${data.sheetUrl}" target="_blank" style="color:#60a5fa">Abrir Google Sheets ↗</a>`;
+    document.getElementById('sheets-link-wrap').innerHTML=`
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px;">
+        <a href="${data.pdfDownloadUrl}" download="${data.pdfFilename || 'Contrarecibo.pdf'}" class="btn btn-primary" style="padding:8px 16px; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#eb0a1e; color:#fff; border:none;">
+          ⬇️ Descargar Contrarecibo (PDF)
+        </a>
+        <a href="${data.pdfPreviewUrl}" target="_blank" class="btn btn-outline" style="padding:8px 14px; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#fff; color:#1e293b; border:1px solid #cbd5e1;">
+          👁️ Ver PDF
+        </a>
+        <a href="${data.sheetUrl}" target="_blank" class="btn btn-outline" style="padding:8px 14px; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:#fff; color:#2563eb; border:1px solid #bfdbfe;">
+          📊 Abrir Google Sheets ↗
+        </a>
+      </div>
+    `;
 
     // Auto-register as expense
     const categoria = document.getElementById('inp-categoria').value || 'OTROS';

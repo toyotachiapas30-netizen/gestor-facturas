@@ -105,18 +105,21 @@ router.post('/llenar', async (req, res) => {
     }
 
     // 2. Autodetectar pestañas en el documento para usar la primera si la especificada no existe
+    let targetGid = 0;
     try {
       const doc = await sheets.spreadsheets.get({ spreadsheetId: targetSheetId });
-      const sheetNames = (doc.data.sheets || []).map(s => s.properties.title).filter(Boolean);
-      if (sheetNames.length > 0) {
-        if (!sheetNames.includes(tabName)) {
-          console.log(`⚠️ La pestaña "${tabName}" no existe. Autodetectando primera disponible: "${sheetNames[0]}"`);
-          tabName = sheetNames[0];
-        }
+      const allSheets = (doc.data.sheets || []).map(s => s.properties).filter(Boolean);
+      if (allSheets.length > 0) {
+        const matchedTab = allSheets.find(p => p.title === tabName) || allSheets[0];
+        tabName = matchedTab.title;
+        targetGid = matchedTab.sheetId || 0;
       }
     } catch (metaErr) {
       console.warn('⚠️ Error al consultar pestañas de la hoja:', metaErr.message);
     }
+
+    // Formatear fecha sin hora para que no se corte en la celda I40
+    const cleanFecha = String(fecha || '').split('T')[0].split(' ')[0].trim() || fecha;
 
     // 3. Escribir los 4 valores directamente en la COPIA INDIVIDUAL
     await sheets.spreadsheets.values.batchUpdate({
@@ -124,18 +127,63 @@ router.post('/llenar', async (req, res) => {
       requestBody: {
         valueInputOption: 'USER_ENTERED',
         data: [
-          { range: `${tabName}!${CELL_NO_FACT}`,  values: [[noFact]]   },
-          { range: `${tabName}!${CELL_FECHA}`,     values: [[fecha]]    },
-          { range: `${tabName}!${CELL_IMPORTE}`,   values: [[importe]]  },
-          { range: `${tabName}!${CELL_CONCEPTO}`,  values: [[concepto]] }
+          { range: `${tabName}!${CELL_NO_FACT}`,  values: [[noFact]]     },
+          { range: `${tabName}!${CELL_FECHA}`,     values: [[cleanFecha]] },
+          { range: `${tabName}!${CELL_IMPORTE}`,   values: [[importe]]    },
+          { range: `${tabName}!${CELL_CONCEPTO}`,  values: [[concepto]]   }
         ]
       }
     });
 
-    return res.json({ ok: true, sheetUrl, mensaje: 'Contrarecibo individual generado, llenado y respaldado correctamente' });
+    const safeFolio = String(noFact || 'S-F').replace(/[^A-Za-z0-9_-]/g, '_');
+    const pdfFilename = `Contrarecibo_${safeFolio}.pdf`;
+    const pdfDownloadUrl = `/api/sheets/pdf/${encodeURIComponent(targetSheetId)}?gid=${encodeURIComponent(targetGid)}&filename=${encodeURIComponent(pdfFilename)}&download=1`;
+    const pdfPreviewUrl = `/api/sheets/pdf/${encodeURIComponent(targetSheetId)}?gid=${encodeURIComponent(targetGid)}&filename=${encodeURIComponent(pdfFilename)}`;
+
+    return res.json({
+      ok: true,
+      sheetId: targetSheetId,
+      gid: targetGid,
+      sheetUrl,
+      pdfDownloadUrl,
+      pdfPreviewUrl,
+      pdfFilename,
+      mensaje: 'Contrarecibo individual generado, llenado y respaldado correctamente'
+    });
   } catch (err) {
     console.error('Sheets error:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── GET /api/sheets/pdf/:sheetId  →  Export Contrarecibo as 1-page PDF ───
+router.get('/pdf/:sheetId', async (req, res) => {
+  const client = getAuthorizedClient();
+  if (!client) return res.status(401).json({ ok: false, error: 'No autorizado con Google.' });
+
+  const { sheetId } = req.params;
+  const gid = req.query.gid || '0';
+  const filename = String(req.query.filename || `Contrarecibo_${sheetId}.pdf`).replace(/["\r\n]/g, '');
+  const isDownload = req.query.download === '1' || req.query.download === 'true';
+
+  try {
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/export?format=pdf&gid=${encodeURIComponent(gid)}&scale=4&size=letter&portrait=true&gridlines=false`;
+    const response = await client.request({
+      url: exportUrl,
+      responseType: 'arraybuffer'
+    });
+
+    const pdfBuffer = Buffer.from(response.data);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `${isDownload ? 'attachment' : 'inline'}; filename="${filename}"`
+    );
+    res.setHeader('Content-Length', pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error('Error exportando PDF de Contrarecibo:', err.message);
+    return res.status(500).json({ ok: false, error: 'No se pudo exportar el PDF del contrarecibo: ' + err.message });
   }
 });
 
