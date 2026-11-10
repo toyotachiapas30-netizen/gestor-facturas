@@ -95,6 +95,7 @@ function gestorAuth(req, res, next) {
     '/toyota-chiapas.png', 
     '/farrera-poniente.png', 
     '/api/auth/login',
+    '/api/auth/users',
     '/api/drive/callback',
     '/api/buzon-bridge/register',
     '/api/buzon-bridge/status',
@@ -221,21 +222,59 @@ function isGenericName(name) {
   return /^(asociado(\s+toyota)?|colaborador|empleado|usuario|sin\s+nombre)\b/i.test(clean);
 }
 
-async function resolveControlPagosAssociate(empInput) {
+function getLocalControlPagosUsers() {
+  try {
+    const { db } = require('./routes/gastos');
+    const row = db.prepare('SELECT value FROM config WHERE key = ?').get('control_pagos_users');
+    if (row && row.value) {
+      const parsed = JSON.parse(row.value);
+      if (Array.isArray(parsed.users)) return parsed.users;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveLocalControlPagosUsers(users) {
+  try {
+    const { db, triggerDriveBackup } = require('./routes/gastos');
+    const payload = { users: Array.isArray(users) ? users : [], updated_at: new Date().toISOString() };
+    db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run('control_pagos_users', JSON.stringify(payload));
+    if (typeof triggerDriveBackup === 'function') triggerDriveBackup();
+  } catch (e) {}
+}
+
+function parseSharedToyoterUsersCookie(req) {
+  try {
+    const cookies = (req && req.headers && req.headers.cookie) || '';
+    const found = cookies.split(';').map(c => c.trim()).find(c => c.startsWith('toyoter_cp_users='));
+    if (!found) return [];
+    const raw = decodeURIComponent(found.split('=').slice(1).join('='));
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+async function resolveControlPagosAssociate(empInput, req = null) {
   const target = normalizeEmp(empInput);
   if (!target) return null;
 
-  const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=in.(__KPI_USERS_control-pagos__,__DO_SYSTEM_USERS__,__DO_ASSOCIATES_DIRECTORY__)&fecha_cita=eq.2099-12-31&select=folio,datos_recepcion`;
-  const r = await fetch(url, {
-    headers: {
-      apikey: DO_SUPABASE_KEY,
-      Authorization: `Bearer ${DO_SUPABASE_KEY}`,
-      'Cache-Control': 'no-cache'
+  let rows = [];
+  try {
+    const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=in.(__KPI_USERS_control-pagos__,__DO_SYSTEM_USERS__,__DO_ASSOCIATES_DIRECTORY__)&fecha_cita=eq.2099-12-31&select=folio,datos_recepcion`;
+    const r = await fetch(url, {
+      headers: {
+        apikey: DO_SUPABASE_KEY,
+        Authorization: `Bearer ${DO_SUPABASE_KEY}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    if (r.ok) {
+      const data = await r.json();
+      if (Array.isArray(data)) rows = data;
     }
-  });
-  if (!r.ok) return null;
-  const rows = await r.json();
-  if (!Array.isArray(rows)) return null;
+  } catch (e) {}
 
   const assocMap = new Map();
   const dirRow = rows.find(x => x.folio === '__DO_ASSOCIATES_DIRECTORY__');
@@ -272,11 +311,10 @@ async function resolveControlPagosAssociate(empInput) {
     }
   }
 
-  // 2. Lista específica de Control de Pagos en KPIs | Seguimientos (Opción B: Switch 1 = Oriente, Switch 2 = Poniente)
-  const kpiRow = rows.find(x => x.folio === '__KPI_USERS_control-pagos__');
-  if (Array.isArray(kpiRow?.datos_recepcion?.users)) {
-    for (const u of kpiRow.datos_recepcion.users) {
-      const emp = normalizeEmp(u.employeeNumber);
+  const applyUsersList = (usersList) => {
+    if (!Array.isArray(usersList)) return;
+    for (const u of usersList) {
+      const emp = normalizeEmp(u.employeeNumber || u.numEmpleado);
       if (!emp) continue;
       const dirInfo = assocMap.get(emp);
       const bestName = (dirInfo && dirInfo.fullName) || (!isGenericName(u.fullName) ? u.fullName : `Asociado #${emp}`);
@@ -305,10 +343,78 @@ async function resolveControlPagosAssociate(empInput) {
         accesoPoniente
       });
     }
+  };
+
+  // 2. Lista específica en Supabase (__KPI_USERS_control-pagos__)
+  const kpiRow = rows.find(x => x.folio === '__KPI_USERS_control-pagos__');
+  if (Array.isArray(kpiRow?.datos_recepcion?.users)) {
+    applyUsersList(kpiRow.datos_recepcion.users);
+  }
+
+  // 3. Lista sincronizada localmente / Google Drive (config: control_pagos_users)
+  const localUsers = getLocalControlPagosUsers();
+  if (localUsers.length > 0) {
+    applyUsersList(localUsers);
+  }
+
+  // 4. Cookie compartida .toyoter.com (toyoter_cp_users) para sincronización instantánea en el mismo navegador
+  const cookieUsers = parseSharedToyoterUsersCookie(req);
+  if (cookieUsers.length > 0) {
+    applyUsersList(cookieUsers);
   }
 
   return authorizedMap.get(target) || null;
 }
+
+// ── Endpoint de sincronización de usuarios desde admin.toyoter.com ──
+app.get('/api/auth/users', async (req, res) => {
+  try {
+    let remoteUsers = [];
+    const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.__KPI_USERS_control-pagos__&fecha_cita=eq.2099-12-31&select=datos_recepcion`;
+    const r = await fetch(url, {
+      headers: { apikey: DO_SUPABASE_KEY, Authorization: `Bearer ${DO_SUPABASE_KEY}`, 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) {
+      const rows = await r.json();
+      if (Array.isArray(rows) && rows[0]?.datos_recepcion?.users) {
+        remoteUsers = rows[0].datos_recepcion.users;
+      }
+    }
+    const localUsers = getLocalControlPagosUsers();
+    const merged = new Map();
+    for (const u of [...remoteUsers, ...localUsers]) {
+      const emp = normalizeEmp(u && (u.employeeNumber || u.numEmpleado));
+      if (emp) merged.set(emp, u);
+    }
+    return res.json({ ok: true, users: Array.from(merged.values()) });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/auth/users', async (req, res) => {
+  try {
+    const { users } = req.body || {};
+    if (!Array.isArray(users)) {
+      return res.status(400).json({ ok: false, error: 'Lista de usuarios inválida' });
+    }
+    saveLocalControlPagosUsers(users);
+    const payload = { users, updated_at: new Date().toISOString() };
+    await fetch(`${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.__KPI_USERS_control-pagos__&fecha_cita=eq.2099-12-31`, {
+      method: 'PATCH',
+      headers: {
+        apikey: DO_SUPABASE_KEY,
+        Authorization: `Bearer ${DO_SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify({ datos_recepcion: payload })
+    });
+    return res.json({ ok: true, count: users.length });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // ── Rutas de Autenticación del Gestor ────────────────────────
 app.post('/api/auth/login', async (req, res) => {
@@ -335,7 +441,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     // 2. Acceso directo por Número de Empleado desde admin.toyoter.com (KPIs | Seguimientos)
     if (candidate) {
-      const assoc = await resolveControlPagosAssociate(candidate);
+      const assoc = await resolveControlPagosAssociate(candidate, req);
       if (assoc) {
         res.setHeader('Set-Cookie', [
           `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
@@ -395,7 +501,7 @@ app.get('/api/auth/me', async (req, res) => {
   // Revalidación en tiempo real contra admin.toyoter.com si entró con Número de Empleado
   if (emp && !['ADMIN', 'ORIENTE', 'PONIENTE'].includes(emp.toUpperCase())) {
     try {
-      const liveAssoc = await resolveControlPagosAssociate(emp);
+      const liveAssoc = await resolveControlPagosAssociate(emp, req);
       if (!liveAssoc) {
         res.setHeader('Set-Cookie', [
           'gestor_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
