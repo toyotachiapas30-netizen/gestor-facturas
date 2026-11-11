@@ -2807,12 +2807,13 @@ function renderComprobantes() {
           <button class="btn btn-outline" style="padding:5px 10px; font-size:11px; color:#dc2626; border-color:#fca5a5; background:#fef2f2;" onclick="borrarComprobanteBandeja('${esc(it.idClave)}', '${esc(it.messageId)}')" title="Borrar de la Bandeja">
             🗑️ Borrar
           </button>
-          <button class="btn btn-primary" id="${btnVincularId}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="vincularComprobanteAGasto(${idx}, '${selectId}', '${btnVincularId}')">
+          <button class="btn btn-primary" id="${btnVincularId}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="vincularComprobanteAGasto('${esc(it.idClave)}', '${selectId}', '${btnVincularId}')">
             ⚡ Subir a Drive y Marcar PAGADO →
           </button>
         `;
       } else {
         actionsHtml = `
+          ${sug && sug.id ? `<button class="btn btn-outline" id="${btnVincularId}-quick" style="padding:5px 10px; font-size:11px; color:#047857; border-color:#6ee7b7; background:#ecfdf5; font-weight:700;" onclick="vincularComprobanteAGasto('${esc(it.idClave)}', '${selectId}', '${btnVincularId}-quick')" title="Volver a subir el PDF a Google Drive y asegurar estatus PAGADO">☁️ Subir a Drive y Marcar PAGADO</button>` : ''}
           <button class="btn btn-outline" style="padding:5px 10px; font-size:11px;" onclick="toggleSelectorComprobante('${editRowId}')">
             🔄 Cambiar Gasto
           </button>
@@ -2827,7 +2828,7 @@ function renderComprobantes() {
             <select id="${selectId}" style="padding:5px 8px; font-size:12px; border-radius:6px; border:1px solid #cbd5e1; background:#fff; color:#1e293b; font-weight:600; flex:1; min-width:240px;">
               ${optionsHtml.join('')}
             </select>
-            <button class="btn btn-primary" id="${btnVincularId}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="vincularComprobanteAGasto(${idx}, '${selectId}', '${btnVincularId}')">
+            <button class="btn btn-primary" id="${btnVincularId}" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="vincularComprobanteAGasto('${esc(it.idClave)}', '${selectId}', '${btnVincularId}')">
               ⚡ Guardar y Actualizar en Drive →
             </button>
           </div>`
@@ -2911,34 +2912,16 @@ function descargarTodosComprobantesCorreo(messageId) {
   });
 }
 
-async function vincularComprobanteAGasto(idx, selectId, btnId) {
-  const q = (document.getElementById('comp-search')?.value || '').trim().toLowerCase();
-  const estFilter = document.getElementById('comp-estatus')?.value || 'todos';
-  const filtered = (window.comprobantesItems || []).filter(it => {
-    if (estFilter !== 'todos' && it.estatus !== estFilter) return false;
-    if (q) {
-      const hay = [
-        it.filename,
-        it.proveedorDetectado,
-        it.operacion,
-        it.folioDetectado,
-        it.subject,
-        it.fromName,
-        it.fromEmail,
-        it.montoDetectado,
-        it.gastoSugerido?.proveedor,
-        it.gastoSugerido?.folio
-      ].join(' ').toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-
-  const item = filtered[idx];
+async function vincularComprobanteAGasto(idClaveOrIdx, selectId, btnId) {
+  const allItems = window.comprobantesItems || [];
+  let item = allItems.find(x => x.idClave === idClaveOrIdx);
+  if (!item && typeof idClaveOrIdx === 'number') {
+    item = allItems[idClaveOrIdx];
+  }
   if (!item) return;
 
   const selEl = document.getElementById(selectId);
-  const gastoId = selEl ? selEl.value : '';
+  const gastoId = (selEl && selEl.value) ? selEl.value : (item.gastoSugerido ? item.gastoSugerido.id : '');
   if (!gastoId) {
     alert('Por favor selecciona la factura correspondiente en la lista desplegable para vincular este comprobante de pago.');
     return;
@@ -2968,8 +2951,23 @@ async function vincularComprobanteAGasto(idx, selectId, btnId) {
       throw new Error(data.error || 'No se pudo vincular el comprobante.');
     }
 
-    await loadComprobantes(true);
-    loadGastos();
+    // Actualizar en memoria inmediatamente sin esperar re-escaneo completo de Gmail
+    item.estatus = 'procesado';
+    if (data.gasto) {
+      item.gastoSugerido = data.gasto;
+    } else if (item.gastoSugerido) {
+      item.gastoSugerido.estatus = 'pagado';
+      item.gastoSugerido.comprobante_pago_url = data.url;
+    }
+    const gDisp = (window.comprobantesGastosDisponibles || []).find(g => g.id === gastoId);
+    if (gDisp) {
+      gDisp.estatus = 'pagado';
+      gDisp.comprobante_pago_url = data.url;
+    }
+
+    saveComprobantesInstantCache(window.comprobantesItems, window.comprobantesGastosDisponibles);
+    renderComprobantes();
+    await loadGastos();
   } catch (err) {
     alert('Error al vincular comprobante: ' + err.message);
     if (btn) {

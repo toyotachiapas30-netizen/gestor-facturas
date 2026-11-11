@@ -5,7 +5,7 @@ const path = require('path');
 const xml2js = require('xml2js');
 const router = express.Router();
 const { getAuthorizedClient, getGoogle } = require('./drive');
-const { getDB, getGestorRole, backupDatabaseToDrive } = require('./gastos');
+const { getDB, getGestorRole, backupDatabaseToDrive, ensureFreshDatabaseFromDrive } = require('./gastos');
 
 // ── Descompresor ZIP en Memoria (Nativo con zlib + Soporte Recursivo ZIP dentro de ZIP) ──
 function extractZipBuffer(zipBuf, depth = 0, parentPath = '') {
@@ -461,6 +461,7 @@ router.get('/inbox', async (req, res) => {
     }
 
     const messages = listRes?.data?.messages || [];
+    await ensureFreshDatabaseFromDrive(false);
     const db = getDB();
 
     // Preparar consultas de caché y cruces con gastos / bandeja_estado
@@ -627,10 +628,6 @@ router.get('/inbox', async (req, res) => {
       for (const item of batchResults) {
         if (item) correos.push(item);
       }
-    }
-
-    if (cacheDirty) {
-      backupDatabaseToDrive().catch(e => console.warn('⚠️ Error respaldando caché de bandeja:', e.message));
     }
 
     const role = getGestorRole(req);
@@ -832,9 +829,9 @@ router.get('/attachment/:messageId/:attachmentId', async (req, res) => {
   }
 });
 
-// ── PATCH /api/mail/estatus ───────────────────────────────
-// Cambia manualmente el estatus de una factura en la Bandeja (pendiente | procesado | descartado | borrado)
-router.patch('/estatus', async (req, res) => {
+// ── PATCH/POST /api/mail/estatus (y /estado) ──────────────
+// Cambia manualmente el estatus de una factura o comprobante en la Bandeja (pendiente | procesado | descartado | borrado)
+async function handleUpdateEstatusBandeja(req, res) {
   try {
     if (!isAuthorizedBandejaUser(req)) {
       return res.status(403).json({ ok: false, error: 'Acceso exclusivo para el trabajador 9997.' });
@@ -848,6 +845,7 @@ router.patch('/estatus', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Estatus inválido.' });
     }
 
+    await ensureFreshDatabaseFromDrive(true);
     const clave = String(uuid || idClave).trim().toUpperCase();
     const db = getDB();
 
@@ -859,14 +857,16 @@ router.patch('/estatus', async (req, res) => {
         updated_at = excluded.updated_at
     `).run(clave, messageId || '', (uuid || '').toUpperCase(), estatus);
 
-    // Respaldar en segundo plano hacia Google Drive
-    backupDatabaseToDrive().catch(e => console.warn('⚠️ Error respaldando estado de bandeja:', e.message));
+    await backupDatabaseToDrive();
 
     return res.json({ ok: true, idClave: clave, estatus });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
-});
+}
+router.patch('/estatus', handleUpdateEstatusBandeja);
+router.post('/estatus', handleUpdateEstatusBandeja);
+router.post('/estado', handleUpdateEstatusBandeja);
 
 // ── DELETE /api/mail/correo/:messageId ────────────────────
 // Borra permanentemente un correo completo (y todas sus facturas) de la Bandeja de Entrada
@@ -1652,6 +1652,7 @@ router.get('/comprobantes', async (req, res) => {
     });
 
     const messages = listRes?.data?.messages || [];
+    await ensureFreshDatabaseFromDrive(false);
     const db = getDB();
 
     // Cargar gastos de Toyota Chiapas (Oriente / Matriz) para emparejamiento automático
@@ -1768,7 +1769,7 @@ router.get('/comprobantes', async (req, res) => {
             let estatus = 'pendiente';
             if (manualEstado === 'descartado') {
               estatus = 'descartado';
-            } else if (manualEstado === 'procesado' || (matchedGasto && matchedGasto.estatus === 'pagado' && matchedGasto.comprobante_pago_url)) {
+            } else if (matchedGasto && matchedGasto.estatus === 'pagado' && matchedGasto.comprobante_pago_url) {
               estatus = 'procesado';
             }
 
@@ -1865,6 +1866,7 @@ router.post('/comprobantes/vincular', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Faltan datos para vincular el comprobante (messageId, attachmentId, gastoId).' });
     }
 
+    await ensureFreshDatabaseFromDrive(true);
     const db = getDB();
     const gasto = db.prepare('SELECT * FROM gastos WHERE id = ?').get(gastoId);
     if (!gasto) {
@@ -1911,19 +1913,40 @@ router.post('/comprobantes/vincular', async (req, res) => {
     // 3. Subir el PDF a Drive con el formato estándar PAGO_<folio>_<filename>
     const cleanFilename = filename || 'Comprobante_Pago.pdf';
     const driveFileName = `PAGO_${gasto.folio || 'S-F'}_${cleanFilename}`;
-    const driveRes = await drive.files.create({
-      requestBody: {
-        name: driveFileName,
-        parents: [folderId]
-      },
-      media: {
-        mimeType: 'application/pdf',
-        body: require('stream').Readable.from(pdfBuffer)
-      },
-      fields: 'id, webViewLink'
+    const safeDriveFileName = driveFileName.replace(/'/g, "\\'");
+
+    // Reutilizar o actualizar si ya existe el mismo archivo en la carpeta del proveedor
+    let webViewLink = '';
+    const existingFileRes = await drive.files.list({
+      q: `'${folderId}' in parents and name='${safeDriveFileName}' and trashed=false`,
+      fields: 'files(id, webViewLink)'
     });
 
-    const webViewLink = driveRes.data.webViewLink;
+    if (existingFileRes.data.files && existingFileRes.data.files.length > 0) {
+      const existingFile = existingFileRes.data.files[0];
+      const updRes = await drive.files.update({
+        fileId: existingFile.id,
+        media: {
+          mimeType: 'application/pdf',
+          body: require('stream').Readable.from(pdfBuffer)
+        },
+        fields: 'id, webViewLink'
+      });
+      webViewLink = updRes.data.webViewLink || existingFile.webViewLink;
+    } else {
+      const driveRes = await drive.files.create({
+        requestBody: {
+          name: driveFileName,
+          parents: [folderId]
+        },
+        media: {
+          mimeType: 'application/pdf',
+          body: require('stream').Readable.from(pdfBuffer)
+        },
+        fields: 'id, webViewLink'
+      });
+      webViewLink = driveRes.data.webViewLink;
+    }
 
     // 4. Actualizar gasto a PAGADO y guardar registro en bandeja_estado
     db.prepare('UPDATE gastos SET comprobante_pago_url = ?, estatus = ? WHERE id = ?').run(webViewLink, 'pagado', gastoId);
@@ -1938,12 +1961,15 @@ router.post('/comprobantes/vincular', async (req, res) => {
 
     await backupDatabaseToDrive();
 
+    const updatedGasto = db.prepare('SELECT id, proveedor, folio, monto, fecha_factura, concepto, estatus, comprobante_pago_url FROM gastos WHERE id = ?').get(gastoId);
+
     return res.json({
       ok: true,
       url: webViewLink,
       gastoId,
       proveedor: gasto.proveedor,
-      folio: gasto.folio
+      folio: gasto.folio,
+      gasto: updatedGasto
     });
   } catch (err) {
     console.error('🔥 Error en POST /api/mail/comprobantes/vincular:', err.message);

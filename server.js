@@ -125,6 +125,10 @@ app.use(async (req, res, next) => {
   if (process.env.VERCEL && !vercelInitPromise) {
     vercelInitPromise = (async () => {
       try {
+        const { restoreTokensFromDatabase } = require('./routes/drive');
+        await restoreTokensFromDatabase();
+      } catch (e) {}
+      try {
         const { restoreDatabaseFromDrive } = require('./routes/gastos');
         await restoreDatabaseFromDrive();
       } catch (e) {}

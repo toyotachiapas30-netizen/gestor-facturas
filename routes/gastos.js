@@ -155,11 +155,12 @@ router.get('/check/:uuid', (req, res) => {
 });
 
 // ── GET /api/gastos  →  List expenses ──
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { mes, anio, categoria, estatus, desde, hasta, proveedor, sucursal } = req.query;
-  const db = getDB();
 
   try {
+    await ensureFreshDatabaseFromDrive(false);
+    const db = getDB();
     let sql = "SELECT * FROM gastos WHERE id != '00000000-0000-0000-0000-000000000000'";
     const params = [];
     
@@ -634,6 +635,10 @@ router.delete('/:id/factura', async (req, res) => {
 // ── Sincronización con Google Drive ────────────────────────
 let backupTimer = null;
 let isBackingUp = false;
+let pendingBackup = false;
+let activeBackupPromise = null;
+let lastDriveModifiedTime = '';
+let lastDriveCheckAt = 0;
 
 function triggerBackup() {
   if (backupTimer) clearTimeout(backupTimer);
@@ -644,16 +649,20 @@ function triggerBackup() {
   }, 1000);
 }
 
-async function backupDatabaseToDrive() {
-  if (isBackingUp) return;
-  isBackingUp = true;
-
+async function runSingleBackupToDrive() {
   const DATA_DIR = getDataDir();
   const dbPath = path.join(DATA_DIR, 'gastos.db');
-  const backupTempPath = path.join(DATA_DIR, 'gastos_backup.db');
+  const backupTempPath = path.join(DATA_DIR, `gastos_backup_${Date.now()}.db`);
 
   try {
-    const client = getAuthorizedClient();
+    let client = getAuthorizedClient();
+    if (!client) {
+      try {
+        const { restoreTokensFromDatabase } = require('./drive');
+        await restoreTokensFromDatabase();
+        client = getAuthorizedClient();
+      } catch (e) {}
+    }
     if (!client) {
       console.log('ℹ️ Google Drive no autorizado, omitiendo respaldo de base de datos.');
       return;
@@ -664,30 +673,28 @@ async function backupDatabaseToDrive() {
       return;
     }
 
-    // Guard de seguridad: verificar que la base de datos local no esté vacía antes de sobrescribir
     const db = getDB();
     const countRow = db.prepare("SELECT count(*) as count FROM gastos").get();
     const count = countRow ? countRow.count : 0;
-    
+
     if (count === 0) {
       console.warn('⚠️ Alerta de seguridad: La base de datos local tiene 0 registros. Omitiendo respaldo a Drive para proteger la copia remota.');
       return;
     }
 
-    // Sincronizar también en tiempo real con la Hoja Maestra de Google Sheets en la carpeta Antigravity
     try {
       const { scheduleMasterSheetSync } = require('../utils/sheets-db');
       scheduleMasterSheetSync(db);
     } catch (e) {}
 
-    // Generar snapshot consistente y seguro mediante la API nativa de SQLite backup
     await db.backup(backupTempPath);
 
     console.log(`💾 Respaldando base de datos SQLite (${count} registros) en Google Drive...`);
     const drive = getGoogle().drive({ version: 'v3', auth: client });
     const searchRes = await drive.files.list({
       q: "name = 'gestor_facturas_database.db' and trashed = false",
-      fields: 'files(id)'
+      fields: 'files(id, modifiedTime)',
+      orderBy: 'modifiedTime desc'
     });
 
     const media = {
@@ -695,43 +702,78 @@ async function backupDatabaseToDrive() {
       body: fs.createReadStream(backupTempPath)
     };
 
-    if (searchRes.data.files.length > 0) {
+    if (searchRes.data.files && searchRes.data.files.length > 0) {
       const fileId = searchRes.data.files[0].id;
-      await drive.files.update({
+      const updRes = await drive.files.update({
         fileId,
         requestBody: { name: 'gestor_facturas_database.db' },
-        media
+        media,
+        fields: 'id, modifiedTime'
       });
+      if (updRes?.data?.modifiedTime) {
+        lastDriveModifiedTime = updRes.data.modifiedTime;
+        lastDriveCheckAt = Date.now();
+      }
       console.log('✅ Respaldo de base de datos actualizado con éxito en Google Drive.');
     } else {
-      await drive.files.create({
+      const createRes = await drive.files.create({
         requestBody: {
           name: 'gestor_facturas_database.db'
         },
         media,
-        fields: 'id'
+        fields: 'id, modifiedTime'
       });
+      if (createRes?.data?.modifiedTime) {
+        lastDriveModifiedTime = createRes.data.modifiedTime;
+        lastDriveCheckAt = Date.now();
+      }
       console.log('✅ Respaldo de base de datos creado con éxito en Google Drive.');
     }
   } catch (err) {
     console.error('❌ Error al respaldar base de datos en Google Drive:', err.message);
   } finally {
-    isBackingUp = false;
     if (fs.existsSync(backupTempPath)) {
       try { fs.unlinkSync(backupTempPath); } catch (e) {}
     }
   }
 }
 
+async function backupDatabaseToDrive() {
+  if (isBackingUp) {
+    pendingBackup = true;
+    return activeBackupPromise;
+  }
+  isBackingUp = true;
+  activeBackupPromise = (async () => {
+    try {
+      do {
+        pendingBackup = false;
+        await runSingleBackupToDrive();
+      } while (pendingBackup);
+    } finally {
+      isBackingUp = false;
+      activeBackupPromise = null;
+    }
+  })();
+  return activeBackupPromise;
+}
+
 async function restoreDatabaseFromDrive() {
   const DATA_DIR = getDataDir();
   const dbPath = path.join(DATA_DIR, 'gastos.db');
-  const tempPath = path.join(DATA_DIR, 'gastos_download.db.tmp');
+  const tempPath = path.join(DATA_DIR, `gastos_download_${Date.now()}.db.tmp`);
 
   try {
-    const client = getAuthorizedClient();
+    let client = getAuthorizedClient();
     if (!client) {
-      console.log('ℹ️ Google Drive no autorizado. Usando base de datos SQLite local vacía.');
+      try {
+        const { restoreTokensFromDatabase } = require('./drive');
+        await restoreTokensFromDatabase();
+        client = getAuthorizedClient();
+      } catch (e) {}
+    }
+    if (!client) {
+      console.log('ℹ️ Google Drive no autorizado. Usando base de datos SQLite local.');
       return;
     }
     const drive = getGoogle().drive({ version: 'v3', auth: client });
@@ -739,14 +781,15 @@ async function restoreDatabaseFromDrive() {
     console.log('🔍 Buscando respaldo de base de datos en Google Drive...');
     const res = await drive.files.list({
       q: "name = 'gestor_facturas_database.db' and trashed = false",
-      fields: 'files(id)'
+      fields: 'files(id, modifiedTime)',
+      orderBy: 'modifiedTime desc'
     });
 
-    if (res.data.files.length > 0) {
+    if (res.data.files && res.data.files.length > 0) {
       const fileId = res.data.files[0].id;
+      const remoteModTime = res.data.files[0].modifiedTime || '';
       console.log(`📥 Descargando respaldo seguro desde Google Drive (File ID: ${fileId})...`);
 
-      // Descargar en un archivo temporal primero para nunca truncar gastos.db si la red falla
       const dest = fs.createWriteStream(tempPath);
       const driveRes = await drive.files.get(
         { fileId, alt: 'media' },
@@ -760,15 +803,13 @@ async function restoreDatabaseFromDrive() {
           .on('error', reject);
       });
 
-      // Verificar tamaño de archivo descargado
       const stats = fs.statSync(tempPath);
       if (!stats || stats.size === 0) {
-        console.error('⚠️ El archivo descargado desde Drive está vacío (0 bytes). Restauración abortada para proteger datos locales.');
+        console.error('⚠️ El archivo descargado desde Drive está vacío (0 bytes). Restauración abortada.');
         if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
         return;
       }
 
-      // Verificar validez SQLite del archivo descargado
       const Database = require('better-sqlite3');
       const testDb = new Database(tempPath);
       const testCount = testDb.prepare("SELECT count(*) as count FROM gastos").get().count;
@@ -776,9 +817,21 @@ async function restoreDatabaseFromDrive() {
 
       console.log(`✅ Archivo restaurado verificado correctamente con ${testCount} registros.`);
 
-      // Copiar atómicamente el archivo verificado a la base de datos de producción
+      // Cerrar conexión abierta y limpiar WAL/SHM antes de reemplazar gastos.db
+      if (_db) {
+        try { _db.close(); } catch (e) {}
+        _db = null;
+      }
+      for (const suffix of ['-wal', '-shm']) {
+        if (fs.existsSync(dbPath + suffix)) {
+          try { fs.unlinkSync(dbPath + suffix); } catch (e) {}
+        }
+      }
+
       fs.copyFileSync(tempPath, dbPath);
-      fs.unlinkSync(tempPath);
+      try { fs.unlinkSync(tempPath); } catch (e) {}
+      lastDriveModifiedTime = remoteModTime;
+      lastDriveCheckAt = Date.now();
       console.log('✅ Base de datos SQLite restaurada con éxito.');
     } else {
       console.log('ℹ️ No se encontró ningún respaldo de base de datos en Google Drive.');
@@ -789,6 +842,38 @@ async function restoreDatabaseFromDrive() {
       try { fs.unlinkSync(tempPath); } catch (e) {}
     }
   }
+}
+
+async function ensureFreshDatabaseFromDrive(forceCheck = false) {
+  if (!process.env.VERCEL && !forceCheck) return;
+  if (isBackingUp) return;
+  const now = Date.now();
+  if (!forceCheck && lastDriveModifiedTime && (now - lastDriveCheckAt < 2500)) {
+    return;
+  }
+  try {
+    let client = getAuthorizedClient();
+    if (!client) {
+      const { restoreTokensFromDatabase } = require('./drive');
+      await restoreTokensFromDatabase();
+      client = getAuthorizedClient();
+    }
+    if (!client) return;
+    const drive = getGoogle().drive({ version: 'v3', auth: client });
+    const res = await drive.files.list({
+      q: "name = 'gestor_facturas_database.db' and trashed = false",
+      fields: 'files(id, modifiedTime)',
+      orderBy: 'modifiedTime desc',
+      pageSize: 1
+    });
+    lastDriveCheckAt = Date.now();
+    if (res.data.files && res.data.files.length > 0) {
+      const remoteMod = res.data.files[0].modifiedTime || '';
+      if (remoteMod && remoteMod !== lastDriveModifiedTime) {
+        await restoreDatabaseFromDrive();
+      }
+    }
+  } catch (e) {}
 }
 
 // ── GET /api/gastos/:id/download-comprobante ────────
@@ -855,5 +940,7 @@ module.exports = {
   getDB,
   getGestorRole,
   restoreDatabaseFromDrive,
-  backupDatabaseToDrive
+  backupDatabaseToDrive,
+  ensureFreshDatabaseFromDrive,
+  triggerDriveBackup: triggerBackup
 };
