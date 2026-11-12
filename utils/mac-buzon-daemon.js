@@ -15,14 +15,38 @@ const supaAgent = new https.Agent({ keepAlive: true, maxSockets: 10 });
 const autotecAgent = new https.Agent({ keepAlive: true, rejectUnauthorized: false, maxSockets: 10 });
 
 const inFlight = new Set();
+const lastXmlValidationBySession = new Map();
+let lastXmlValidationGlobal = null;
 
-function supaRequest(method, path, bodyObj = null) {
+function getSessionKey(headers = {}) {
+  const cookie = headers['cookie'] || headers['Cookie'] || '';
+  const m = cookie.match(/ASP\.NET_SessionId=([^;\s]+)/i);
+  return m ? m[1] : '__default__';
+}
+
+function replaceMultipartField(bodyBuf, fieldName, newValue) {
+  if (!Buffer.isBuffer(bodyBuf) || !newValue) return bodyBuf;
+  const marker = Buffer.from(`name="${fieldName}"\r\n\r\n`);
+  const idx = bodyBuf.indexOf(marker);
+  if (idx === -1) return bodyBuf;
+  const valStart = idx + marker.length;
+  const valEnd = bodyBuf.indexOf(Buffer.from('\r\n--'), valStart);
+  if (valEnd === -1) return bodyBuf;
+  return Buffer.concat([
+    bodyBuf.subarray(0, valStart),
+    Buffer.from(newValue, 'utf8'),
+    bodyBuf.subarray(valEnd)
+  ]);
+}
+
+function supaRequest(method, path, bodyObj = null, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     const bodyStr = bodyObj ? JSON.stringify(bodyObj) : '';
     const headers = {
       apikey: DO_SUPABASE_KEY,
       Authorization: `Bearer ${DO_SUPABASE_KEY}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...extraHeaders
     };
     if (bodyStr) {
       headers['Content-Length'] = Buffer.byteLength(bodyStr);
@@ -58,11 +82,14 @@ function supaRequest(method, path, bodyObj = null) {
   });
 }
 
-function forwardToAutotec(reqData) {
+function forwardToAutotec(reqData, overrideBodyBuf = null) {
   return new Promise((resolve, reject) => {
-    const bodyBuf = reqData.bodyB64 ? Buffer.from(reqData.bodyB64, 'base64') : Buffer.alloc(0);
+    const bodyBuf = overrideBodyBuf || (reqData.bodyB64 ? Buffer.from(reqData.bodyB64, 'base64') : Buffer.alloc(0));
     const outHeaders = { ...(reqData.headers || {}) };
     outHeaders['Host'] = 'autotec.farrera.net:60002';
+    delete outHeaders['user-agent'];
+    outHeaders['User-Agent'] =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
     if (outHeaders['origin'] || outHeaders['Origin']) {
       delete outHeaders['origin'];
       outHeaders['Origin'] = 'https://autotec.farrera.net:60002';
@@ -113,9 +140,59 @@ async function processRow(row) {
   if (!row || !row.id || inFlight.has(row.id)) return;
   inFlight.add(row.id);
   try {
+    // Reclamo atómico para evitar doble envío si hay más de un agente activo
+    const claimed = await supaRequest(
+      'PATCH',
+      `/rest/v1/taller_citas?id=eq.${row.id}&estado=eq.PENDING`,
+      { estado: 'PROCESSING' },
+      { Prefer: 'return=representation' }
+    );
+    if (!Array.isArray(claimed) || claimed.length === 0) {
+      return;
+    }
+
     const reqData = row.datos_recepcion || {};
-    console.log(`[${new Date().toISOString()}] -> ${reqData.method || 'GET'} ${reqData.path || '/buzonfecg.aspx'}`);
-    const resObj = await forwardToAutotec(reqData);
+    const method = reqData.method || 'GET';
+    const path = reqData.path || '/buzonfecg.aspx';
+    console.log(`[${new Date().toISOString()}] -> ${method} ${path}`);
+
+    let overrideBodyBuf = null;
+    if (method === 'POST' && reqData.bodyB64) {
+      const rawBuf = Buffer.from(reqData.bodyB64, 'base64');
+      const sessKey = getSessionKey(reqData.headers);
+      if (rawBuf.includes(Buffer.from('ctl00$ContentPlaceHolder1$btnValidaXML'))) {
+        const saved = { reqData, timestamp: Date.now() };
+        lastXmlValidationBySession.set(sessKey, saved);
+        lastXmlValidationGlobal = saved;
+      } else if (rawBuf.includes(Buffer.from('ctl00$ContentPlaceHolder1$btnEnviar'))) {
+        const prev = lastXmlValidationBySession.get(sessKey) || lastXmlValidationGlobal;
+        if (prev && Date.now() - prev.timestamp > 1500) {
+          try {
+            console.log(`[${new Date().toISOString()}] 🔄 Re-validando XML atómicamente antes de Enviar PDF (sesión ${sessKey})...`);
+            const revalRes = await forwardToAutotec({
+              ...prev.reqData,
+              headers: {
+                ...(prev.reqData.headers || {}),
+                Cookie: reqData.headers?.cookie || reqData.headers?.Cookie || prev.reqData.headers?.cookie || prev.reqData.headers?.Cookie || ''
+              }
+            });
+            const revalHtml = Buffer.from(revalRes.bodyB64 || '', 'base64').toString('utf8');
+            const freshVs = revalHtml.match(/id="__VIEWSTATE"\s+value="([^"]*)"/)?.[1];
+            const freshEv = revalHtml.match(/id="__EVENTVALIDATION"\s+value="([^"]*)"/)?.[1];
+            if (freshVs && freshEv) {
+              let updatedBuf = replaceMultipartField(rawBuf, '__VIEWSTATE', freshVs);
+              updatedBuf = replaceMultipartField(updatedBuf, '__EVENTVALIDATION', freshEv);
+              overrideBodyBuf = updatedBuf;
+              console.log(`[${new Date().toISOString()}] ✅ XML re-validado (<100ms antes de Enviar PDF).`);
+            }
+          } catch (revalErr) {
+            console.error(`[${new Date().toISOString()}] Warn re-validación previa:`, revalErr.message);
+          }
+        }
+      }
+    }
+
+    const resObj = await forwardToAutotec(reqData, overrideBodyBuf);
     await supaRequest('PATCH', `/rest/v1/taller_citas?id=eq.${row.id}`, {
       estado: 'DONE',
       datos_recepcion: {

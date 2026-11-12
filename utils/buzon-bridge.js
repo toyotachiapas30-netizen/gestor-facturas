@@ -66,6 +66,8 @@ async function relayViaSupabase(req, bodyBuffer, timeoutMs = 25000) {
     }
     cleanHeaders[k] = v;
   }
+  cleanHeaders['User-Agent'] =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
   // 1. Insertar petición en cola HTTPS (puerto 443)
   const insertRes = await axios.post(
