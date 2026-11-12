@@ -123,6 +123,7 @@ function switchMainView(view) {
   if (view === 'gastos') loadGastos();
   if (view === 'bandeja') loadBandeja();
   if (view === 'comprobantes') loadComprobantes();
+  if (view === 'buzon') loadBuzonConfirmaciones();
 }
 
 // ── Step navigation ───────────────────────────────────────────────────────────
@@ -150,6 +151,11 @@ function goTo(n) {
   });
 
   // Special behavior
+  if (n === 2) {
+    if (typeof buscarConfirmacionBuzonFlujo === 'function') {
+      buscarConfirmacionBuzonFlujo(true);
+    }
+  }
   if (n === 3) {
     // We are in Paso 4 (logical 4, index 3)
     const sucName = document.getElementById('inp-sucursal').options[document.getElementById('inp-sucursal').selectedIndex].text;
@@ -708,6 +714,8 @@ function resetFlow() {
   // Clear results
   document.getElementById('sat-badge').style.display = 'none';
   document.getElementById('drive-result').style.display = 'none';
+  const flowBuzonRes = document.getElementById('flow-buzon-result');
+  if (flowBuzonRes) flowBuzonRes.style.display = 'none';
   document.getElementById('sheet-preview').style.display = 'none';
   document.getElementById('sheets-result').style.display = 'none';
   document.getElementById('final-success').style.display = 'none';
@@ -3031,4 +3039,415 @@ function b64toBlob(b64Data, contentType = '', sliceSize = 512) {
     console.error('Error decoding base64:', e);
     throw new Error('El archivo PDF recibido no es válido (Base64 corrupto).');
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 📬 BUZÓN AUTOTEC (ENVÍO ATÓMICO + DESCARGA DE CONFIRMACIÓN EN PDF)
+// ═════════════════════════════════════════════════════════════════════════════
+
+window.buzonConfirmacionesList = [];
+const buzonDirectState = {
+  xmlFile: null,
+  pdfFile: null,
+  cfdiMeta: null
+};
+
+function mostrarResultadoBuzonFlujo(info) {
+  const box = document.getElementById('flow-buzon-result');
+  if (!box) return;
+
+  const titleEl = document.getElementById('flow-buzon-res-title');
+  const empEl = document.getElementById('flow-buzon-res-empresa');
+  const subEl = document.getElementById('flow-buzon-res-sub');
+  const dlBtn = document.getElementById('flow-buzon-btn-dl');
+  const viewBtn = document.getElementById('flow-buzon-btn-view');
+
+  const folio = info.folio || (state.cfdi && state.cfdi.noFactura) || 'S/F';
+  const empresa =
+    info.empresaReceptora ||
+    (state.cfdi && state.cfdi.nombreReceptor) ||
+    'VALOR FARRERA AUTOMOTRIZ S. DE R.L. DE C.V.';
+
+  if (titleEl) {
+    titleEl.textContent = `✅ Factura Folio #${folio} Registrada en Buzón Autotec`;
+  }
+  if (empEl) {
+    empEl.textContent = `Razón Social Receptora: ${empresa}`;
+  }
+  if (subEl) {
+    subEl.textContent = info.avisoPortal
+      ? `${info.avisoPortal} • Destinatario: ${info.to || 'toyotachiapas30@gmail.com'}`
+      : `Confirmación oficial de Sistema Autotec Web (notifica@gfarrera.com.mx)`;
+  }
+
+  // Agregar parámetros extra de la factura al PDF si están disponibles
+  const extraParams = new URLSearchParams();
+  if (state.cfdi) {
+    if (state.cfdi.nombreEmisor) extraParams.set('emisor', state.cfdi.nombreEmisor);
+    if (state.cfdi.uuid) extraParams.set('uuid', state.cfdi.uuid);
+    if (state.cfdi.total) extraParams.set('total', state.cfdi.total);
+  }
+  const extraQuery = extraParams.toString();
+  const appendExtra = url => {
+    if (!url) return '#';
+    if (!extraQuery) return url;
+    return url + (url.includes('?') ? '&' : '?') + extraQuery;
+  };
+
+  if (dlBtn) {
+    dlBtn.href = appendExtra(info.pdfDownloadUrl);
+    dlBtn.setAttribute('download', `Confirmacion-Autotec-Folio-${folio}.pdf`);
+  }
+  if (viewBtn) {
+    viewBtn.href = appendExtra(info.pdfPreviewUrl);
+  }
+
+  box.style.display = 'block';
+}
+
+async function enviarBuzonDesdeFlujo() {
+  const errBox = document.getElementById('err-flow-buzon');
+  const errMsg = document.getElementById('err-flow-buzon-msg');
+  if (errBox) errBox.style.display = 'none';
+
+  if (!state.xmlFile || !state.pdfFile) {
+    if (errBox && errMsg) {
+      errMsg.textContent = 'Debes tener cargados los archivos XML y PDF de la factura en el Paso 1.';
+      errBox.style.display = 'flex';
+    }
+    return;
+  }
+
+  const nombre = (document.getElementById('flow-buzon-nombre')?.value || 'YONI JAVIER RUIZ DOMINGUEZ').trim();
+  const telefono = (document.getElementById('flow-buzon-telefono')?.value || '9616179900').trim();
+  const correo = (document.getElementById('flow-buzon-correo')?.value || 'toyotachiapas30@gmail.com').trim();
+  const ordenCompra = (document.getElementById('flow-buzon-orden')?.value || '').trim();
+  const folio = (state.cfdi && state.cfdi.noFactura) || '';
+
+  setLoading('btn-flow-buzon-send', 'spin-flow-buzon', true);
+
+  try {
+    const fd = new FormData();
+    fd.append('xml', state.xmlFile);
+    fd.append('pdf', state.pdfFile);
+    fd.append('nombre', nombre);
+    fd.append('telefono', telefono);
+    fd.append('correo', correo);
+    fd.append('ordenCompra', ordenCompra);
+    if (folio) fd.append('folio', folio);
+
+    const res = await fetch('/api/autotec/buzon', {
+      method: 'POST',
+      body: fd
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo registrar la factura en el Buzón Autotec.');
+    }
+
+    state.buzonOk = true;
+    mostrarResultadoBuzonFlujo({
+      folio: data.folio || folio,
+      empresaReceptora: data.empresaReceptora,
+      avisoPortal: data.avisoPortal,
+      to: data.confirmacion?.to || correo,
+      pdfDownloadUrl: data.pdfDownloadUrl,
+      pdfPreviewUrl: data.pdfPreviewUrl
+    });
+  } catch (err) {
+    if (errBox && errMsg) {
+      errMsg.textContent = err.message;
+      errBox.style.display = 'flex';
+    }
+  } finally {
+    setLoading('btn-flow-buzon-send', 'spin-flow-buzon', false);
+  }
+}
+
+async function buscarConfirmacionBuzonFlujo(silent = false) {
+  const errBox = document.getElementById('err-flow-buzon');
+  const errMsg = document.getElementById('err-flow-buzon-msg');
+  if (!silent && errBox) errBox.style.display = 'none';
+
+  const folioRaw = (state.cfdi && state.cfdi.noFactura) || '';
+  const folio = String(folioRaw).replace(/^[^0-9A-Za-z]+/, '').trim();
+  if (!folio) {
+    if (!silent && errBox && errMsg) {
+      errMsg.textContent = 'No se detectó un Folio en el XML cargado para buscar su confirmación.';
+      errBox.style.display = 'flex';
+    }
+    return;
+  }
+
+  const btn = document.getElementById('btn-flow-buzon-check');
+  const origText = btn ? btn.innerHTML : '';
+  if (!silent && btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Buscando en correo...';
+  }
+
+  try {
+    const res = await fetch(`/api/autotec/confirmaciones?folio=${encodeURIComponent(folio)}`);
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.items) && data.items.length > 0) {
+      const best = data.items.find(m => m.esValorFarrera) || data.items[0];
+      mostrarResultadoBuzonFlujo({
+        folio: best.folio || folio,
+        empresaReceptora: best.empresaReceptora,
+        avisoPortal: `Confirmación encontrada en correo (${new Date(best.internalDate).toLocaleString('es-MX')})`,
+        to: best.to,
+        pdfDownloadUrl: best.pdfDownloadUrl,
+        pdfPreviewUrl: best.pdfPreviewUrl
+      });
+    } else if (!silent && errBox && errMsg) {
+      errMsg.textContent = `Aún no se encontró correo de confirmación de notifica@gfarrera.com.mx para el folio "${folio}". Haz clic en "Enviar al Buzón Autotec" para registrarla.`;
+      errBox.style.display = 'flex';
+    }
+  } catch (err) {
+    if (!silent && errBox && errMsg) {
+      errMsg.textContent = err.message;
+      errBox.style.display = 'flex';
+    }
+  } finally {
+    if (!silent && btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
+}
+
+// ── Funciones de la Pestaña Dedicada: 📬 Buzón Autotec ───────────────────────
+function onBuzonDirectFileChange(type, inputEl) {
+  const file = inputEl?.files?.[0];
+  if (!file) return;
+
+  if (type === 'xml') {
+    buzonDirectState.xmlFile = file;
+    const nameEl = document.getElementById('buzon-direct-xml-name');
+    if (nameEl) nameEl.textContent = `✅ ${file.name}`;
+
+    // Leer metadatos del XML para mostrarlos al instante
+    const reader = new FileReader();
+    reader.onload = e => {
+      const parsed = parseCFDI(e.target.result);
+      buzonDirectState.cfdiMeta = parsed;
+      const prevBox = document.getElementById('buzon-direct-xml-preview');
+      if (parsed && prevBox) {
+        document.getElementById('bz-prev-folio').textContent = parsed.noFactura || 'S/F';
+        document.getElementById('bz-prev-receptor').textContent =
+          parsed.nombreReceptor || parsed.rfcReceptor || '—';
+        document.getElementById('bz-prev-emisor').textContent =
+          parsed.nombreEmisor || parsed.rfcEmisor || '—';
+        document.getElementById('bz-prev-total').textContent = fmtMonto(parsed.total, parsed.moneda);
+        prevBox.style.display = 'block';
+      }
+    };
+    reader.readAsText(file);
+  } else if (type === 'pdf') {
+    buzonDirectState.pdfFile = file;
+    const nameEl = document.getElementById('buzon-direct-pdf-name');
+    if (nameEl) nameEl.textContent = `✅ ${file.name}`;
+  }
+}
+
+async function enviarBuzonDirecto() {
+  const errBox = document.getElementById('err-buzon-direct');
+  const errMsg = document.getElementById('err-buzon-direct-msg');
+  if (errBox) errBox.style.display = 'none';
+
+  if (!buzonDirectState.xmlFile || !buzonDirectState.pdfFile) {
+    if (errBox && errMsg) {
+      errMsg.textContent = 'Por favor selecciona tanto el archivo XML como el archivo PDF de la factura.';
+      errBox.style.display = 'flex';
+    }
+    return;
+  }
+
+  const nombre = (document.getElementById('buzon-direct-nombre')?.value || 'YONI JAVIER RUIZ DOMINGUEZ').trim();
+  const telefono = (document.getElementById('buzon-direct-telefono')?.value || '9616179900').trim();
+  const correo = (document.getElementById('buzon-direct-correo')?.value || 'toyotachiapas30@gmail.com').trim();
+  const ordenCompra = (document.getElementById('buzon-direct-orden')?.value || '').trim();
+
+  setLoading('btn-buzon-direct-send', 'spin-buzon-direct', true);
+
+  try {
+    const fd = new FormData();
+    fd.append('xml', buzonDirectState.xmlFile);
+    fd.append('pdf', buzonDirectState.pdfFile);
+    fd.append('nombre', nombre);
+    fd.append('telefono', telefono);
+    fd.append('correo', correo);
+    fd.append('ordenCompra', ordenCompra);
+
+    const res = await fetch('/api/autotec/buzon', {
+      method: 'POST',
+      body: fd
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'Error al registrar la factura en el Buzón Autotec.');
+    }
+
+    const resBox = document.getElementById('buzon-direct-result');
+    const titleEl = document.getElementById('buzon-direct-res-title');
+    const empEl = document.getElementById('buzon-direct-res-empresa');
+    const subEl = document.getElementById('buzon-direct-res-sub');
+    const dlBtn = document.getElementById('buzon-direct-btn-dl');
+    const viewBtn = document.getElementById('buzon-direct-btn-view');
+
+    const folio = data.folio || 'Factura';
+    if (titleEl) {
+      titleEl.textContent = `✅ Factura Folio #${folio} Registrada Exitosamente en Buzón Autotec`;
+    }
+    if (empEl) {
+      empEl.textContent = `Razón Social Receptora: ${data.empresaReceptora}`;
+    }
+    if (subEl) {
+      subEl.textContent = `${data.avisoPortal} • Confirmación enviada a ${correo}`;
+    }
+
+    const extraParams = new URLSearchParams();
+    if (data.xmlMeta) {
+      if (data.xmlMeta.emisorNombre) extraParams.set('emisor', data.xmlMeta.emisorNombre);
+      if (data.xmlMeta.uuid) extraParams.set('uuid', data.xmlMeta.uuid);
+      if (data.xmlMeta.total) extraParams.set('total', data.xmlMeta.total);
+    }
+    const extraQuery = extraParams.toString();
+    const appendExtra = url => {
+      if (!url) return '#';
+      if (!extraQuery) return url;
+      return url + (url.includes('?') ? '&' : '?') + extraQuery;
+    };
+
+    if (dlBtn) {
+      dlBtn.href = appendExtra(data.pdfDownloadUrl);
+      dlBtn.setAttribute('download', `Confirmacion-Autotec-Folio-${folio}.pdf`);
+    }
+    if (viewBtn) {
+      viewBtn.href = appendExtra(data.pdfPreviewUrl);
+    }
+
+    if (resBox) resBox.style.display = 'block';
+
+    // Refrescar el historial inferior para mostrar la nueva confirmación
+    loadBuzonConfirmaciones(true);
+  } catch (err) {
+    if (errBox && errMsg) {
+      errMsg.textContent = err.message;
+      errBox.style.display = 'flex';
+    }
+  } finally {
+    setLoading('btn-buzon-direct-send', 'spin-buzon-direct', false);
+  }
+}
+
+async function loadBuzonConfirmaciones(force = false) {
+  const listEl = document.getElementById('buzon-hist-list');
+  if (!listEl) return;
+
+  setLoading('btn-buzon-hist-refresh', 'spin-buzon-hist', true);
+  if (force || window.buzonConfirmacionesList.length === 0) {
+    listEl.innerHTML = `
+      <div style="text-align:center; padding:32px; color:#64748b; font-size:13px;">
+        ⏳ Consultando confirmaciones oficiales de <code>notifica@gfarrera.com.mx</code> en tu correo...
+      </div>
+    `;
+  }
+
+  try {
+    const res = await fetch('/api/autotec/confirmaciones?limit=45');
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudieron cargar las confirmaciones.');
+    }
+    window.buzonConfirmacionesList = data.items || [];
+    renderBuzonConfirmaciones();
+  } catch (err) {
+    listEl.innerHTML = `
+      <div style="text-align:center; padding:28px; color:#dc2626; font-size:13px;">
+        ⚠️ Error al cargar confirmaciones: ${err.message}
+      </div>
+    `;
+  } finally {
+    setLoading('btn-buzon-hist-refresh', 'spin-buzon-hist', false);
+  }
+}
+
+function renderBuzonConfirmaciones() {
+  const listEl = document.getElementById('buzon-hist-list');
+  if (!listEl) return;
+
+  const q = (document.getElementById('buzon-hist-search')?.value || '').trim().toLowerCase();
+  let items = window.buzonConfirmacionesList || [];
+
+  if (q) {
+    items = items.filter(
+      it =>
+        String(it.folio || '').toLowerCase().includes(q) ||
+        String(it.empresaReceptora || '').toLowerCase().includes(q) ||
+        String(it.to || '').toLowerCase().includes(q) ||
+        String(it.bodyText || '').toLowerCase().includes(q)
+    );
+  }
+
+  if (items.length === 0) {
+    listEl.innerHTML = `
+      <div style="text-align:center; padding:32px; color:#64748b; font-size:13px;">
+        📭 No se encontraron confirmaciones de <code>notifica@gfarrera.com.mx</code> con ese criterio.
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = items
+    .map(it => {
+      const fechaStr = it.internalDate
+        ? new Date(it.internalDate).toLocaleString('es-MX', {
+            dateStyle: 'medium',
+            timeStyle: 'short'
+          })
+        : it.date;
+
+      const isValor = it.esValorFarrera;
+      const borderColor = isValor ? '#a7f3d0' : '#fde68a';
+      const bgBadge = isValor ? '#ecfdf5' : '#fffbeb';
+      const colorBadge = isValor ? '#047857' : '#b45309';
+      const iconBadge = isValor ? '✅' : '⚠️';
+
+      return `
+        <div style="border:1.5px solid ${borderColor}; border-radius:12px; padding:14px 18px; margin-bottom:12px; background:#ffffff; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+          <div style="flex:1; min-width:260px;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+              <span style="background:#0f172a; color:#fff; font-weight:800; font-size:12.5px; padding:3px 10px; border-radius:6px;">
+                FOLIO #${it.folio || 'S/F'}
+              </span>
+              <span style="background:${bgBadge}; color:${colorBadge}; border:1px solid ${borderColor}; font-weight:700; font-size:12px; padding:3px 10px; border-radius:999px;">
+                ${iconBadge} ${it.empresaReceptora}
+              </span>
+              ${
+                it.esReenvio
+                  ? `<span style="background:#fef2f2; color:#dc2626; border:1px solid #fecaca; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;">REENVÍO</span>`
+                  : `<span style="background:#f0fdf4; color:#15803d; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;">REGISTRO ORIGINAL</span>`
+              }
+              <span style="font-size:12px; color:#64748b;">📅 ${fechaStr}</span>
+            </div>
+            <div style="font-size:12.5px; color:#334155; margin-bottom:4px;">
+              ${it.bodyText}
+            </div>
+            <div style="font-size:11.5px; color:#64748b;">
+              📩 <strong>Enviado a:</strong> ${it.to.replace(/</g, '&lt;').replace(/>/g, '&gt;')} • <strong>ID:</strong> <code>${it.id}</code>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <a href="${it.pdfDownloadUrl}" download="Confirmacion-Autotec-Folio-${it.folio || it.id}.pdf" class="btn btn-primary" style="background:#059669; border-color:#059669; text-decoration:none; font-size:12.5px; padding:8px 14px; font-weight:700; white-space:nowrap;">
+              ⬇️ Descargar Confirmación (PDF)
+            </a>
+            <a href="${it.pdfPreviewUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none; font-size:12.5px; padding:8px 12px; font-weight:700; white-space:nowrap;">
+              👁️ Ver PDF
+            </a>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
 }

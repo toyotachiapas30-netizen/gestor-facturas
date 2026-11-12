@@ -172,8 +172,74 @@ async function handleBuzonProxy(req, res) {
   }
 }
 
+async function requestAutotecBuzon({ method = 'GET', path = '/buzonfecg.aspx', headers = {}, bodyBuffer = Buffer.alloc(0), timeoutMs = 25000 }) {
+  const fakeReq = {
+    method,
+    originalUrl: path,
+    url: path,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      ...headers
+    }
+  };
+
+  if (!process.env.VERCEL) {
+    try {
+      const https = require('https');
+      const directRes = await new Promise((resolve, reject) => {
+        const reqOpts = {
+          hostname: 'autotec.farrera.net',
+          port: 60002,
+          path,
+          method,
+          headers: {
+            ...fakeReq.headers,
+            Host: 'autotec.farrera.net:60002',
+            ...(bodyBuffer && bodyBuffer.length > 0 ? { 'Content-Length': bodyBuffer.length } : {})
+          },
+          rejectUnauthorized: false,
+          timeout: 12000
+        };
+        const r = https.request(reqOpts, res => {
+          const chunks = [];
+          res.on('data', c => chunks.push(c));
+          res.on('end', () => {
+            const buf = Buffer.concat(chunks);
+            resolve({
+              statusCode: res.statusCode,
+              contentType: res.headers['content-type'] || 'text/html; charset=utf-8',
+              setCookie: res.headers['set-cookie'] || [],
+              bodyBuffer: buf,
+              html: buf.toString('utf8')
+            });
+          });
+        });
+        r.on('error', reject);
+        r.on('timeout', () => { r.destroy(); reject(new Error('Direct timeout')); });
+        if (bodyBuffer && bodyBuffer.length > 0) r.write(bodyBuffer);
+        r.end();
+      });
+      return directRes;
+    } catch (_) {
+      // Fallback to Supabase HTTPS relay
+    }
+  }
+
+  const relayed = await relayViaSupabase(fakeReq, bodyBuffer, timeoutMs);
+  const buf = Buffer.from(relayed.bodyB64 || '', 'base64');
+  return {
+    statusCode: relayed.statusCode || 200,
+    contentType: relayed.contentType || 'text/html; charset=utf-8',
+    setCookie: relayed.setCookie || [],
+    bodyBuffer: buf,
+    html: buf.toString('utf8')
+  };
+}
+
 module.exports = {
   getBridgeConfig,
   saveBridgeConfig,
+  relayViaSupabase,
+  requestAutotecBuzon,
   handleBuzonProxy
 };
