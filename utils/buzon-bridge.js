@@ -172,7 +172,7 @@ async function handleBuzonProxy(req, res) {
   }
 }
 
-async function requestAutotecBuzon({ method = 'GET', path = '/buzonfecg.aspx', headers = {}, bodyBuffer = Buffer.alloc(0), timeoutMs = 25000 }) {
+async function requestAutotecBuzon({ method = 'GET', path = '/buzonfecg.aspx', headers = {}, bodyBuffer = Buffer.alloc(0), timeoutMs = 35000 }) {
   const fakeReq = {
     method,
     originalUrl: path,
@@ -183,46 +183,62 @@ async function requestAutotecBuzon({ method = 'GET', path = '/buzonfecg.aspx', h
     }
   };
 
-  if (!process.env.VERCEL) {
-    try {
-      const https = require('https');
-      const directRes = await new Promise((resolve, reject) => {
-        const reqOpts = {
-          hostname: 'autotec.farrera.net',
-          port: 60002,
-          path,
-          method,
-          headers: {
-            ...fakeReq.headers,
-            Host: 'autotec.farrera.net:60002',
-            ...(bodyBuffer && bodyBuffer.length > 0 ? { 'Content-Length': bodyBuffer.length } : {})
-          },
-          rejectUnauthorized: false,
-          timeout: 12000
-        };
-        const r = https.request(reqOpts, res => {
-          const chunks = [];
-          res.on('data', c => chunks.push(c));
-          res.on('end', () => {
-            const buf = Buffer.concat(chunks);
-            resolve({
-              statusCode: res.statusCode,
-              contentType: res.headers['content-type'] || 'text/html; charset=utf-8',
-              setCookie: res.headers['set-cookie'] || [],
-              bodyBuffer: buf,
-              html: buf.toString('utf8')
-            });
+  try {
+    const https = require('https');
+    const directTimeout = process.env.VERCEL ? 2800 : 10000;
+    const directRes = await new Promise((resolve, reject) => {
+      let doneFlag = false;
+      const finish = (err, val) => {
+        if (doneFlag) return;
+        doneFlag = true;
+        clearTimeout(t);
+        if (err) reject(err);
+        else resolve(val);
+      };
+      const reqOpts = {
+        hostname: 'autotec.farrera.net',
+        port: 60002,
+        path,
+        method,
+        headers: {
+          ...fakeReq.headers,
+          Host: 'autotec.farrera.net:60002',
+          Connection: 'close',
+          ...(bodyBuffer && bodyBuffer.length > 0 ? { 'Content-Length': bodyBuffer.length } : {})
+        },
+        rejectUnauthorized: false,
+        timeout: directTimeout
+      };
+      const r = https.request(reqOpts, res => {
+        const chunks = [];
+        res.on('data', c => chunks.push(c));
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          finish(null, {
+            statusCode: res.statusCode,
+            contentType: res.headers['content-type'] || 'text/html; charset=utf-8',
+            setCookie: res.headers['set-cookie'] || [],
+            bodyBuffer: buf,
+            html: buf.toString('utf8')
           });
         });
-        r.on('error', reject);
-        r.on('timeout', () => { r.destroy(); reject(new Error('Direct timeout')); });
-        if (bodyBuffer && bodyBuffer.length > 0) r.write(bodyBuffer);
-        r.end();
+        res.on('error', err => finish(err));
       });
-      return directRes;
-    } catch (_) {
-      // Fallback to Supabase HTTPS relay
-    }
+      const t = setTimeout(() => {
+        try { r.destroy(); } catch (_) {}
+        finish(new Error('Direct timeout'));
+      }, directTimeout);
+      r.on('error', err => finish(err));
+      r.on('timeout', () => {
+        try { r.destroy(); } catch (_) {}
+        finish(new Error('Direct timeout'));
+      });
+      if (bodyBuffer && bodyBuffer.length > 0) r.write(bodyBuffer);
+      r.end();
+    });
+    return directRes;
+  } catch (_) {
+    // Fallback to Supabase HTTPS relay
   }
 
   const relayed = await relayViaSupabase(fakeReq, bodyBuffer, timeoutMs);
@@ -236,10 +252,68 @@ async function requestAutotecBuzon({ method = 'GET', path = '/buzonfecg.aspx', h
   };
 }
 
+async function relayAtomicBuzonSubmit({ xmlBuffer, pdfBuffer, xmlFilename, pdfFilename, nombre, telefono, correo, ordenCompra, timeoutMs = 52000 }) {
+  const reqId = crypto.randomBytes(8).toString('hex');
+  const folio = `__BUZON_REQ_${reqId}__`;
+
+  const insertRes = await axios.post(
+    `${DO_SUPABASE_URL}/rest/v1/taller_citas`,
+    {
+      folio,
+      fecha_cita: RELAY_DATE,
+      estado: 'PENDING',
+      datos_recepcion: {
+        reqId,
+        method: 'ATOMIC_BUZON',
+        path: '/buzonfecg.aspx',
+        xmlB64: xmlBuffer.toString('base64'),
+        pdfB64: pdfBuffer.toString('base64'),
+        xmlFilename: xmlFilename || 'factura.xml',
+        pdfFilename: pdfFilename || 'factura.pdf',
+        nombre: nombre || 'YONI JAVIER RUIZ DOMINGUEZ',
+        telefono: telefono || '9616179900',
+        correo: correo || 'toyotachiapas30@gmail.com',
+        ordenCompra: ordenCompra || ''
+      }
+    },
+    { headers: { ...supaHeaders, Prefer: 'return=representation' }, timeout: 8000 }
+  );
+
+  const rowId = Array.isArray(insertRes.data) && insertRes.data[0] ? insertRes.data[0].id : null;
+  const start = Date.now();
+
+  try {
+    while (Date.now() - start < timeoutMs) {
+      await new Promise(r => setTimeout(r, 250));
+      const pollRes = await axios.get(
+        `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.${encodeURIComponent(folio)}&select=estado,datos_recepcion`,
+        { headers: supaHeaders, timeout: 6000 }
+      );
+      const row = Array.isArray(pollRes.data) ? pollRes.data[0] : null;
+      if (row && row.estado === 'DONE' && row.datos_recepcion && row.datos_recepcion.res) {
+        const resObj = row.datos_recepcion.res;
+        const jsonStr = Buffer.from(resObj.bodyB64 || '', 'base64').toString('utf8');
+        return JSON.parse(jsonStr);
+      }
+      if (row && row.estado === 'ERROR') {
+        throw new Error(row.datos_recepcion?.error || 'Error en agente local hacia autotec.farrera.net');
+      }
+    }
+    throw new Error('Tiempo de espera agotado esperando respuesta del puente local.');
+  } finally {
+    if (rowId) {
+      axios.delete(`${DO_SUPABASE_URL}/rest/v1/taller_citas?id=eq.${rowId}`, { headers: supaHeaders }).catch(() => {});
+    } else {
+      axios.delete(`${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.${encodeURIComponent(folio)}`, { headers: supaHeaders }).catch(() => {});
+    }
+  }
+}
+
 module.exports = {
   getBridgeConfig,
   saveBridgeConfig,
   relayViaSupabase,
   requestAutotecBuzon,
+  relayAtomicBuzonSubmit,
   handleBuzonProxy
 };

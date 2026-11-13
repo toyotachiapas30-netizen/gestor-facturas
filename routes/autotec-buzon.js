@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const { getAuthorizedClient } = require('./drive');
-const { requestAutotecBuzon } = require('../utils/buzon-bridge');
+const { requestAutotecBuzon, relayAtomicBuzonSubmit } = require('../utils/buzon-bridge');
 
 const router = express.Router();
 const upload = multer({
@@ -21,13 +21,9 @@ function extractTokens(html) {
 }
 
 function extractAlerts(html) {
-  const matches = [...html.matchAll(/alert\(['"]([^'"]+)['"]\)/gi)].map(m => m[1]);
-  const msgSpans = [
-    ...html.matchAll(/id="ctl00_ContentPlaceHolder1_lbl(?:Mensaje|Error|Aviso|Resultado)[^"]*"[^>]*>([\s\S]*?)<\/span>/gi)
-  ]
-    .map(m => m[1].replace(/<[^>]+>/g, '').trim())
-    .filter(Boolean);
-  return [...new Set([...matches, ...msgSpans])];
+  const m1 = [...html.matchAll(/muestraaviso\(['"]([^'"]+)['"]\)/gi)].map(m => m[1]);
+  const m2 = [...html.matchAll(/alert\(['"]([^'"]+)['"]\)/gi)].map(m => m[1]);
+  return [...new Set([...m1, ...m2])];
 }
 
 function buildMultipart(fields, files) {
@@ -176,10 +172,7 @@ async function listNotificaConfirmations({ folioFilter = '', queryFilter = '', m
   if (!auth) throw new Error('Gmail no está autenticado.');
   const gmail = getGoogle().gmail({ version: 'v1', auth });
 
-  let q = 'from:notifica@gfarrera.com.mx';
-  if (folioFilter) {
-    q += ` "${String(folioFilter).trim()}"`;
-  }
+  const q = 'from:notifica@gfarrera.com.mx';
 
   const listRes = await gmail.users.messages.list({
     userId: 'me',
@@ -209,9 +202,17 @@ async function listNotificaConfirmations({ folioFilter = '', queryFilter = '', m
 
   if (folioFilter) {
     const target = String(folioFilter).trim().toUpperCase();
+    const targetDigits = target.replace(/\D+/g, '').replace(/^0+/, '');
     items = items.filter(it => {
       const f = String(it.folio || '').toUpperCase();
-      return f === target || f.endsWith(target) || it.bodyText.toUpperCase().includes(target);
+      const fDigits = f.replace(/\D+/g, '').replace(/^0+/, '');
+      return (
+        f === target ||
+        (targetDigits && fDigits === targetDigits) ||
+        f.endsWith(target) ||
+        target.endsWith(f) ||
+        it.bodyText.toUpperCase().includes(target)
+      );
     });
   }
 
@@ -571,121 +572,146 @@ router.post(
       const correo = (req.body.correo || 'toyotachiapas30@gmail.com').trim();
       const ordenCompra = (req.body.ordenCompra || '').trim();
 
-      // PASO 1: GET /buzonfecg.aspx para iniciar sesión y obtener tokens ASP.NET
-      const getRes = await requestAutotecBuzon({
-        method: 'GET',
-        path: '/buzonfecg.aspx'
-      });
+      let alertsVal = [];
+      let alertsEnv = [];
+      let avisoPortal = 'Factura registrada exitosamente en el Buzón de Grupo Farrera.';
 
-      const sessionCookies = (getRes.setCookie || []).map(c => c.split(';')[0]).join('; ');
-      const t1 = extractTokens(getRes.html);
-
-      if (!t1.vs) {
-        throw new Error('El portal de Autotec no devolvió un estado de sesión válido (__VIEWSTATE).');
-      }
-
-      // PASO 2: POST Validar XML (ctl00$ContentPlaceHolder1$btnValidaXML)
-      const mpVal = buildMultipart(
-        {
-          __EVENTTARGET: '',
-          __EVENTARGUMENT: '',
-          __VIEWSTATE: t1.vs,
-          __VIEWSTATEGENERATOR: t1.vsg,
-          __EVENTVALIDATION: t1.ev,
-          'ctl00$ContentPlaceHolder1$txtContacto': nombre,
-          'ctl00$ContentPlaceHolder1$txtTelefono': telefono,
-          'ctl00$ContentPlaceHolder1$txtCorreo': correo,
-          'ctl00$ContentPlaceHolder1$txtOrden': ordenCompra,
-          'ctl00$ContentPlaceHolder1$btnValidaXML': 'Validar'
-        },
-        [
-          {
-            field: 'ctl00$ContentPlaceHolder1$fuXml',
-            filename: xmlFilename,
-            contentType: 'text/xml',
-            data: xmlBuffer
-          },
-          {
-            field: 'ctl00$ContentPlaceHolder1$fuPdf',
-            filename: '',
-            contentType: 'application/octet-stream',
-            data: Buffer.alloc(0)
-          }
-        ]
-      );
-
-      const valRes = await requestAutotecBuzon({
-        method: 'POST',
-        path: '/buzonfecg.aspx',
-        headers: {
-          Cookie: sessionCookies,
-          'Content-Type': `multipart/form-data; boundary=${mpVal.boundary}`,
-          Referer: 'https://autotec.farrera.net:60002/buzonfecg.aspx'
-        },
-        bodyBuffer: mpVal.body
-      });
-
-      const alertsVal = extractAlerts(valRes.html);
-      const t2 = extractTokens(valRes.html);
-
-      // Si el XML fue rechazado en la validación y no habilitó el botón Enviar, reportar
-      const btnEnviarDisabled = /id="ctl00_ContentPlaceHolder1_btnEnviar"[^>]*disabled="disabled"/i.test(
-        valRes.html
-      );
-      if (btnEnviarDisabled && alertsVal.length > 0) {
-        return res.status(400).json({
-          ok: false,
-          error: `El Buzón Autotec rechazó la validación del XML: ${alertsVal.join(' | ')}`,
-          alertsVal,
-          xmlMeta
+      if (process.env.VERCEL) {
+        const atomicRes = await relayAtomicBuzonSubmit({
+          xmlBuffer,
+          pdfBuffer,
+          xmlFilename,
+          pdfFilename,
+          nombre,
+          telefono,
+          correo,
+          ordenCompra,
+          timeoutMs: 52000
         });
-      }
+        if (!atomicRes || atomicRes.ok === false) {
+          return res.status(400).json({
+            ok: false,
+            error: `El Buzón Autotec rechazó la validación del XML: ${atomicRes?.error || 'Error de validación'}`,
+            alertsVal: atomicRes?.alertsVal || [],
+            xmlMeta
+          });
+        }
+        alertsVal = atomicRes.alertsVal || [];
+        alertsEnv = atomicRes.alertsEnv || [];
+        avisoPortal = atomicRes.avisoPortal || avisoPortal;
+      } else {
+        // PASO 1: GET /buzonfecg.aspx para iniciar sesión y obtener tokens ASP.NET
+        const getRes = await requestAutotecBuzon({
+          method: 'GET',
+          path: '/buzonfecg.aspx'
+        });
 
-      // PASO 3: Inmediatamente (< 50ms) POST Enviar PDF (ctl00$ContentPlaceHolder1$btnEnviar)
-      // Así garantizamos que ninguna otra sesión de Grupo Farrera sobrescriba la razón social en el servidor.
-      const mpEnv = buildMultipart(
-        {
-          __EVENTTARGET: '',
-          __EVENTARGUMENT: '',
-          __VIEWSTATE: t2.vs || t1.vs,
-          __VIEWSTATEGENERATOR: t2.vsg || t1.vsg,
-          __EVENTVALIDATION: t2.ev || t1.ev,
-          'ctl00$ContentPlaceHolder1$txtContacto': nombre,
-          'ctl00$ContentPlaceHolder1$txtTelefono': telefono,
-          'ctl00$ContentPlaceHolder1$txtCorreo': correo,
-          'ctl00$ContentPlaceHolder1$txtOrden': ordenCompra,
-          'ctl00$ContentPlaceHolder1$btnEnviar': 'Enviar'
-        },
-        [
+        const sessionCookies = (getRes.setCookie || []).map(c => c.split(';')[0]).join('; ');
+        const t1 = extractTokens(getRes.html);
+
+        if (!t1.vs) {
+          throw new Error('El portal de Autotec no devolvió un estado de sesión válido (__VIEWSTATE).');
+        }
+
+        // PASO 2: POST Validar XML (ctl00$ContentPlaceHolder1$btnValidaXML)
+        const mpVal = buildMultipart(
           {
-            field: 'ctl00$ContentPlaceHolder1$fuXml',
-            filename: '',
-            contentType: 'application/octet-stream',
-            data: Buffer.alloc(0)
+            ctl00_ToolkitScriptManager1_HiddenField: '',
+            __EVENTTARGET: 'ctl00$ContentPlaceHolder1$btnValidaXML',
+            __EVENTARGUMENT: '',
+            __VIEWSTATE: t1.vs,
+            __VIEWSTATEGENERATOR: t1.vsg,
+            __EVENTVALIDATION: t1.ev,
+            'ctl00$ContentPlaceHolder1$txtNombre': nombre,
+            'ctl00$ContentPlaceHolder1$txtTelefono': telefono,
+            'ctl00$ContentPlaceHolder1$txtMail': correo,
+            'ctl00$ContentPlaceHolder1$txtOrdenCompra': ordenCompra
           },
+          [
+            {
+              field: 'ctl00$ContentPlaceHolder1$FileUploadXML',
+              filename: xmlFilename,
+              contentType: 'text/xml',
+              data: xmlBuffer
+            },
+            {
+              field: 'ctl00$ContentPlaceHolder1$FileUploadPDF',
+              filename: '',
+              contentType: 'application/octet-stream',
+              data: Buffer.alloc(0)
+            }
+          ]
+        );
+
+        const valRes = await requestAutotecBuzon({
+          method: 'POST',
+          path: '/buzonfecg.aspx',
+          headers: {
+            Cookie: sessionCookies,
+            'Content-Type': `multipart/form-data; boundary=${mpVal.boundary}`,
+            Referer: 'https://autotec.farrera.net:60002/buzonfecg.aspx'
+          },
+          bodyBuffer: mpVal.body
+        });
+
+        alertsVal = extractAlerts(valRes.html);
+        const t2 = extractTokens(valRes.html);
+
+        const hasBtnEnviar = /ctl00_ContentPlaceHolder1_btnEnviar/i.test(valRes.html);
+        if (!hasBtnEnviar && alertsVal.length > 0) {
+          return res.status(400).json({
+            ok: false,
+            error: `El Buzón Autotec rechazó la validación del XML: ${alertsVal.join(' | ')}`,
+            alertsVal,
+            xmlMeta
+          });
+        }
+
+        // PASO 3: Inmediatamente (< 50ms) POST Enviar PDF (ctl00$ContentPlaceHolder1$btnEnviar)
+        const mpEnv = buildMultipart(
           {
-            field: 'ctl00$ContentPlaceHolder1$fuPdf',
-            filename: pdfFilename,
-            contentType: 'application/pdf',
-            data: pdfBuffer
-          }
-        ]
-      );
+            ctl00_ToolkitScriptManager1_HiddenField: '',
+            __EVENTTARGET: 'ctl00$ContentPlaceHolder1$btnEnviar',
+            __EVENTARGUMENT: '',
+            __VIEWSTATE: t2.vs || t1.vs,
+            __VIEWSTATEGENERATOR: t2.vsg || t1.vsg,
+            __EVENTVALIDATION: t2.ev || t1.ev,
+            'ctl00$ContentPlaceHolder1$txtNombre': nombre,
+            'ctl00$ContentPlaceHolder1$txtTelefono': telefono,
+            'ctl00$ContentPlaceHolder1$txtMail': correo,
+            'ctl00$ContentPlaceHolder1$txtOrdenCompra': ordenCompra
+          },
+          [
+            {
+              field: 'ctl00$ContentPlaceHolder1$FileUploadXML',
+              filename: '',
+              contentType: 'application/octet-stream',
+              data: Buffer.alloc(0)
+            },
+            {
+              field: 'ctl00$ContentPlaceHolder1$FileUploadPDF',
+              filename: pdfFilename,
+              contentType: 'application/pdf',
+              data: pdfBuffer
+            }
+          ]
+        );
 
-      const envRes = await requestAutotecBuzon({
-        method: 'POST',
-        path: '/buzonfecg.aspx',
-        headers: {
-          Cookie: sessionCookies,
-          'Content-Type': `multipart/form-data; boundary=${mpEnv.boundary}`,
-          Referer: 'https://autotec.farrera.net:60002/buzonfecg.aspx'
-        },
-        bodyBuffer: mpEnv.body
-      });
+        const envRes = await requestAutotecBuzon({
+          method: 'POST',
+          path: '/buzonfecg.aspx',
+          headers: {
+            Cookie: sessionCookies,
+            'Content-Type': `multipart/form-data; boundary=${mpEnv.boundary}`,
+            Referer: 'https://autotec.farrera.net:60002/buzonfecg.aspx'
+          },
+          bodyBuffer: mpEnv.body
+        });
 
-      const alertsEnv = extractAlerts(envRes.html);
-      const avisoPortal =
-        alertsEnv[0] || alertsVal[0] || 'Factura registrada exitosamente en el Buzón de Grupo Farrera.';
+        alertsEnv = extractAlerts(envRes.html);
+        avisoPortal =
+          alertsEnv[0] || alertsVal[0] || 'Factura registrada exitosamente en el Buzón de Grupo Farrera.';
+      }
 
       // PASO 4: Buscar el correo de confirmación en Gmail (notifica@gfarrera.com.mx)
       // Esperamos hasta ~8 segundos (en intervalos de 2s) para capturar el correo recién llegado.
