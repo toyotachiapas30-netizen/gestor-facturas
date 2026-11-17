@@ -431,10 +431,10 @@ app.post('/api/auth/login', async (req, res) => {
     if (clave === 'toyota2026' && (lowerUser === 'admin' || lowerUser === 'oriente' || lowerUser === 'poniente')) {
       const labelMap = { admin: 'Administrador General', oriente: 'Sucursal Oriente', poniente: 'Sucursal Poniente' };
       res.setHeader('Set-Cookie', [
-        `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
-        `gestor_role=${lowerUser}; Path=/; SameSite=Lax; Max-Age=604800`,
-        `gestor_emp=${encodeURIComponent(lowerUser.toUpperCase())}; Path=/; SameSite=Lax; Max-Age=604800`,
-        `gestor_name=${encodeURIComponent(labelMap[lowerUser])}; Path=/; SameSite=Lax; Max-Age=604800`
+        `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200`,
+        `gestor_role=${lowerUser}; Path=/; SameSite=Lax; Max-Age=7200`,
+        `gestor_emp=${encodeURIComponent(lowerUser.toUpperCase())}; Path=/; SameSite=Lax; Max-Age=7200`,
+        `gestor_name=${encodeURIComponent(labelMap[lowerUser])}; Path=/; SameSite=Lax; Max-Age=7200`
       ]);
       return res.json({
         ok: true,
@@ -448,10 +448,10 @@ app.post('/api/auth/login', async (req, res) => {
       const assoc = await resolveControlPagosAssociate(candidate, req);
       if (assoc) {
         res.setHeader('Set-Cookie', [
-          `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`,
-          `gestor_role=${assoc.gestorRole}; Path=/; SameSite=Lax; Max-Age=604800`,
-          `gestor_emp=${encodeURIComponent(assoc.employeeNumber)}; Path=/; SameSite=Lax; Max-Age=604800`,
-          `gestor_name=${encodeURIComponent(assoc.fullName)}; Path=/; SameSite=Lax; Max-Age=604800`
+          `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200`,
+          `gestor_role=${assoc.gestorRole}; Path=/; SameSite=Lax; Max-Age=7200`,
+          `gestor_emp=${encodeURIComponent(assoc.employeeNumber)}; Path=/; SameSite=Lax; Max-Age=7200`,
+          `gestor_name=${encodeURIComponent(assoc.fullName)}; Path=/; SameSite=Lax; Max-Age=7200`
         ]);
         return res.json({
           ok: true,
@@ -518,8 +518,8 @@ app.get('/api/auth/me', async (req, res) => {
       role = liveAssoc.gestorRole;
       fullName = liveAssoc.fullName;
       res.setHeader('Set-Cookie', [
-        `gestor_role=${role}; Path=/; SameSite=Lax; Max-Age=604800`,
-        `gestor_name=${encodeURIComponent(fullName)}; Path=/; SameSite=Lax; Max-Age=604800`
+        `gestor_role=${role}; Path=/; SameSite=Lax; Max-Age=7200`,
+        `gestor_name=${encodeURIComponent(fullName)}; Path=/; SameSite=Lax; Max-Age=7200`
       ]);
     } catch (e) {}
   }

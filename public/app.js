@@ -741,9 +741,28 @@ function fmtShortDate(f) {
 function fmtMonto(t,m) {
   if (!t||t==='—') return '—';
   const n=parseFloat(t); if(isNaN(n)) return t;
-  const c=(m&&m!=='—')?m:'MXN';
+  const c=(m&&m!=='—'&&String(m).toUpperCase()!=='XXX')?m:'MXN';
   try { return new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format(n); } catch { return '$'+n.toFixed(2)+' '+c; }
 }
+
+// ── Cierre automático de sesión por inactividad (30 min) para protección de datos ──
+(function setupGestorInactivityGuard() {
+  const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
+  let idleTimer = null;
+  function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(async () => {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (e) {}
+      window.location.href = '/login.html';
+    }, INACTIVITY_LIMIT_MS);
+  }
+  ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'].forEach(evt => {
+    window.addEventListener(evt, resetIdleTimer, { passive: true });
+  });
+  resetIdleTimer();
+})();
 function fmtMes(mes) {
   if (!mes) return 'Todos';
   const [y, m] = mes.split('-');

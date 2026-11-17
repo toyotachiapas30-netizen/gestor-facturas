@@ -256,6 +256,51 @@ async function parseCFDIXmlBuffer(buffer) {
     const tipoCode = getAttr(comp, 'TipoDeComprobante').toUpperCase();
     const tipoMap = { I: 'Ingreso', E: 'Egreso', T: 'Traslado', N: 'Nómina', P: 'Pago' };
 
+    let totalVal = parseFloat(getAttr(comp, 'Total') || '0') || 0;
+    let subTotalVal = parseFloat(getAttr(comp, 'SubTotal') || '0') || 0;
+    let monedaVal = getAttr(comp, 'Moneda') || 'MXN';
+
+    // Si es Complemento de Recepción de Pagos (CFDI tipo P) o trae Moneda='XXX' / Total=0,
+    // extraer el importe real desde <pago20:Pagos><pago20:Totales MontoTotalPagos="..."/> o <pago20:Pago Monto="..."/>
+    if (tipoCode === 'P' || monedaVal.toUpperCase() === 'XXX' || totalVal === 0) {
+      for (const c of complementos) {
+        if (!c || !c.Pagos) continue;
+        const pagosNode = Array.isArray(c.Pagos) ? c.Pagos[0] : c.Pagos;
+        if (!pagosNode) continue;
+
+        const totalesNode = Array.isArray(pagosNode.Totales) ? pagosNode.Totales[0] : pagosNode.Totales;
+        const montoTotales = parseFloat(getAttr(totalesNode, 'MontoTotalPagos') || '0') || 0;
+
+        const listaPagos = Array.isArray(pagosNode.Pago)
+          ? pagosNode.Pago
+          : (pagosNode.Pago ? [pagosNode.Pago] : []);
+
+        let sumaPagos = 0;
+        let monedaPago = '';
+        for (const pItem of listaPagos) {
+          sumaPagos += parseFloat(getAttr(pItem, 'Monto') || '0') || 0;
+          if (!monedaPago) {
+            monedaPago = getAttr(pItem, 'MonedaP');
+          }
+        }
+
+        const realPaidAmount = montoTotales > 0 ? montoTotales : sumaPagos;
+        if (realPaidAmount > 0) {
+          totalVal = realPaidAmount;
+          subTotalVal = realPaidAmount;
+        }
+        if (monedaPago && monedaPago.toUpperCase() !== 'XXX') {
+          monedaVal = monedaPago.toUpperCase();
+        } else if (monedaVal.toUpperCase() === 'XXX') {
+          monedaVal = 'MXN';
+        }
+      }
+    }
+
+    if (monedaVal.toUpperCase() === 'XXX') {
+      monedaVal = 'MXN';
+    }
+
     return {
       uuid,
       rfcEmisor: getAttr(emisor, 'Rfc') || '—',
@@ -263,9 +308,9 @@ async function parseCFDIXmlBuffer(buffer) {
       rfcReceptor: getAttr(receptor, 'Rfc') || '—',
       nombreReceptor: getAttr(receptor, 'Nombre') || '—',
       fecha: getAttr(comp, 'Fecha') || '',
-      total: parseFloat(getAttr(comp, 'Total') || '0') || 0,
-      subTotal: parseFloat(getAttr(comp, 'SubTotal') || '0') || 0,
-      moneda: getAttr(comp, 'Moneda') || 'MXN',
+      total: totalVal,
+      subTotal: subTotalVal,
+      moneda: monedaVal,
       tipoComprobante: tipoCode || 'I',
       tipo: tipoMap[tipoCode] || tipoCode || 'Ingreso',
       folio,
@@ -393,6 +438,86 @@ function pairXmlsAndPdfs(xmlItems, pdfParts, otherParts) {
   return { facturas, adjuntosExtra };
 }
 
+// ── Respaldo Permanente en Supabase para bandeja_estado (Evita pérdida en Vercel /tmp) ──
+const SUPABASE_CP_URL = process.env.SUPABASE_URL || 'https://ihwucfdwjnguwjxncwdw.supabase.co';
+const SUPABASE_CP_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlod3VjZmR3am5ndXdqeG5jd2R3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NzY4MzQsImV4cCI6MjA5NTA1MjgzNH0.A2ND8DKBDGQ6ymhUDs_x6qZtcStoUDyk_0akG2hVD7Q';
+const BANDEJA_CLOUD_FOLIO = '__CONTROL_PAGOS_BANDEJA_ESTADO__';
+const BANDEJA_CLOUD_DATE = '2099-12-31';
+
+async function loadCloudBandejaEstado() {
+  const defaultMap = {
+    '0F779449-945D-54D7-9E28-AA7DFBE7E9FE': 'procesado'
+  };
+  try {
+    const url = `${SUPABASE_CP_URL}/rest/v1/taller_citas?folio=eq.${encodeURIComponent(BANDEJA_CLOUD_FOLIO)}&fecha_cita=eq.${BANDEJA_CLOUD_DATE}&select=id,datos_recepcion`;
+    const r = await fetch(url, {
+      headers: { apikey: SUPABASE_CP_KEY, Authorization: `Bearer ${SUPABASE_CP_KEY}`, 'Cache-Control': 'no-cache' }
+    });
+    if (!r.ok) return { rowId: null, estados: defaultMap };
+    const rows = await r.json();
+    const row = rows?.[0];
+    const stored = row?.datos_recepcion?.estados || {};
+    return {
+      rowId: row?.id || null,
+      estados: { ...defaultMap, ...stored }
+    };
+  } catch {
+    return { rowId: null, estados: defaultMap };
+  }
+}
+
+async function saveCloudBandejaEstadoEntry(keysToUpdate = {}, status = 'procesado') {
+  try {
+    const { rowId, estados } = await loadCloudBandejaEstado();
+    for (const k of Object.keys(keysToUpdate)) {
+      const clean = String(k || '').trim().toUpperCase();
+      if (clean) estados[clean] = status;
+    }
+    const nowIso = new Date().toISOString();
+    const payload = {
+      updated_at: nowIso,
+      datos_recepcion: {
+        schema: 'CONTROL_PAGOS_BANDEJA_ESTADO_V1',
+        updatedAt: nowIso,
+        estados
+      }
+    };
+    if (rowId) {
+      await fetch(`${SUPABASE_CP_URL}/rest/v1/taller_citas?id=eq.${rowId}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_CP_KEY,
+          Authorization: `Bearer ${SUPABASE_CP_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      await fetch(`${SUPABASE_CP_URL}/rest/v1/taller_citas`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_CP_KEY,
+          Authorization: `Bearer ${SUPABASE_CP_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify({
+          folio: BANDEJA_CLOUD_FOLIO,
+          fecha_cita: BANDEJA_CLOUD_DATE,
+          cliente: 'CONTROL_PAGOS_BANDEJA_ESTADO',
+          ...payload
+        })
+      });
+    }
+  } catch (e) {
+    console.warn('⚠️ Aviso guardando bandeja_estado en Supabase:', e.message);
+  }
+}
+
 // ── GET /api/mail/inbox ───────────────────────────────────
 // Lista correos de Gmail con facturas XML adjuntas, agrupados por correo
 router.get('/inbox', async (req, res) => {
@@ -489,6 +614,17 @@ router.get('/inbox', async (req, res) => {
       }
     }
 
+    // Fusionar estado permanente desde Supabase (garantiza que marcados manuales jamás se reviertan)
+    const cloudBandeja = await loadCloudBandejaEstado();
+    for (const [k, st] of Object.entries(cloudBandeja.estados || {})) {
+      const cleanK = String(k || '').trim().toUpperCase();
+      if (!cleanK || !st) continue;
+      estadoByClave.set(cleanK, st);
+      if (st === 'borrado' && cleanK.startsWith('MSG_')) {
+        correosBorrados.add(cleanK.slice(4));
+      }
+    }
+
     const correos = [];
     let cacheDirty = false;
 
@@ -503,7 +639,7 @@ router.get('/inbox', async (req, res) => {
           const cached = getCacheStmt.get(m.id);
           if (cached && cached.data_json) {
             const parsedCache = JSON.parse(cached.data_json);
-            if (parsedCache && parsedCache.cacheVer === 4) {
+            if (parsedCache && parsedCache.cacheVer === 5) {
               if (parsedCache.noInvoice) return null;
               if (Array.isArray(parsedCache.facturas) && parsedCache.facturas.length > 0) {
                 return parsedCache;
@@ -575,7 +711,7 @@ router.get('/inbox', async (req, res) => {
 
           if (xmlParts.length === 0) {
             try {
-              setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 4, messageId: m.id, noInvoice: true, facturas: [] }));
+              setCacheStmt.run(m.id, internalDateMs, JSON.stringify({ cacheVer: 5, messageId: m.id, noInvoice: true, facturas: [] }));
               cacheDirty = true;
             } catch (e) {}
             return null;
@@ -599,7 +735,7 @@ router.get('/inbox', async (req, res) => {
           if (facturas.length === 0) return null;
 
           const emailItem = {
-            cacheVer: 4,
+            cacheVer: 5,
             messageId: m.id,
             threadId: msgData.threadId,
             subject,
@@ -632,6 +768,10 @@ router.get('/inbox', async (req, res) => {
 
     const role = getGestorRole(req);
 
+    // Ordenar del más reciente al más antiguo y deduplicar por UUID para no duplicar cuando un correo fue reenviado
+    correos.sort((a, b) => b.fechaMs - a.fechaMs);
+    const seenUuidsInInbox = new Set();
+
     // Enriquecer cada factura con su estatus actual (Automático por BD Gastos + Manual)
     const correosEnriquecidos = [];
     for (const c of correos) {
@@ -663,6 +803,10 @@ router.get('/inbox', async (req, res) => {
       const facturasConEstatus = facturasSinGoogle.map(f => {
         const uuidUpper = (f.uuid || '').toUpperCase();
         const claveUpper = (f.idClave || '').toUpperCase();
+        if (uuidUpper) {
+          if (seenUuidsInInbox.has(uuidUpper)) return null;
+          seenUuidsInInbox.add(uuidUpper);
+        }
         const gastoMatch = uuidUpper ? gastosByUuid.get(uuidUpper) : null;
         const manualStatus = estadoByClave.get(uuidUpper) || estadoByClave.get(claveUpper) || null;
 
@@ -857,7 +1001,13 @@ async function handleUpdateEstatusBandeja(req, res) {
         updated_at = excluded.updated_at
     `).run(clave, messageId || '', (uuid || '').toUpperCase(), estatus);
 
-    await backupDatabaseToDrive();
+    const cloudKeys = { [clave]: true };
+    if (uuid) cloudKeys[String(uuid).trim().toUpperCase()] = true;
+    if (idClave) cloudKeys[String(idClave).trim().toUpperCase()] = true;
+    await Promise.all([
+      saveCloudBandejaEstadoEntry(cloudKeys, estatus),
+      backupDatabaseToDrive()
+    ]);
 
     return res.json({ ok: true, idClave: clave, estatus });
   } catch (err) {
