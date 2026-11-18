@@ -18,3 +18,13 @@ CREATE TABLE IF NOT EXISTS gastos (
 CREATE INDEX idx_gastos_uuid ON gastos(uuid);
 CREATE INDEX idx_gastos_mes ON gastos(mes);
 CREATE INDEX idx_gastos_estatus ON gastos(estatus);
+
+-- Row-Level Security (TKT-126)
+ALTER TABLE public.gastos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "toyoter_gastos_access" ON public.gastos;
+CREATE POLICY "toyoter_gastos_access"
+  ON public.gastos
+  FOR ALL
+  TO anon, authenticated, service_role
+  USING (true)
+  WITH CHECK (true);

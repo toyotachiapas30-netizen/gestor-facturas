@@ -423,9 +423,42 @@ app.post('/api/auth/users', async (req, res) => {
 // ── Rutas de Autenticación del Gestor ────────────────────────
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { numEmpleado, usuario, clave } = req.body || {};
+    const { numEmpleado, usuario, clave, aiSessionToken } = req.body || {};
     const candidate = (numEmpleado || usuario || '').trim();
     const lowerUser = candidate.toLowerCase();
+
+    // 0. Acceso directo de Auditoría IA (Muse) mediante JWT de sesión o llave ty_ai_...
+    if (aiSessionToken || lowerUser.startsWith('ty_ai_')) {
+      try {
+        const headers = { 'X-Toyoter-Project': 'control-pagos' };
+        if (aiSessionToken) headers.Authorization = `Bearer ${aiSessionToken}`;
+        else headers['X-Toyoter-AI-Key'] = lowerUser;
+        const shieldRes = await fetch('https://admin.toyoter.com/api/toyoter-auth?action=session&project=control-pagos', {
+          method: 'GET',
+          headers
+        });
+        const shieldJson = await shieldRes.json().catch(() => ({}));
+        if (shieldRes.ok && shieldJson && shieldJson.ok && shieldJson.user) {
+          res.setHeader('Set-Cookie', [
+            `gestor_session=${GESTOR_SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200`,
+            `gestor_role=admin; Path=/; SameSite=Lax; Max-Age=7200`,
+            `gestor_emp=9997; Path=/; SameSite=Lax; Max-Age=7200`,
+            `gestor_name=${encodeURIComponent(shieldJson.user.nombreCompleto || 'Auditoría Muse IA')}; Path=/; SameSite=Lax; Max-Age=7200`
+          ]);
+          return res.json({
+            ok: true,
+            role: 'admin',
+            user: {
+              employeeNumber: '9997',
+              fullName: shieldJson.user.nombreCompleto || 'Auditoría Muse IA',
+              role: 'admin',
+              accesoOriente: true,
+              accesoPoniente: true
+            }
+          });
+        }
+      } catch (e) {}
+    }
 
     // 1. Acceso de respaldo con usuario y contraseña tradicional
     if (clave === 'toyota2026' && (lowerUser === 'admin' || lowerUser === 'oriente' || lowerUser === 'poniente')) {
