@@ -137,7 +137,19 @@ app.use(async (req, res, next) => {
         await restoreTokensFromDatabase();
       } catch (e) {}
     })();
-    await vercelInitPromise;
+  }
+  if (vercelInitPromise) {
+    const isAuthOrStatic =
+      req.path === '/login.html' ||
+      req.path === '/api/auth/login' ||
+      req.path.endsWith('.png') ||
+      req.path.endsWith('.jpg') ||
+      req.path.endsWith('.css');
+    if (isAuthOrStatic) {
+      await Promise.race([vercelInitPromise, new Promise(r => setTimeout(r, 400))]);
+    } else {
+      await Promise.race([vercelInitPromise, new Promise(r => setTimeout(r, 6000))]);
+    }
   }
   next();
 });
@@ -226,12 +238,22 @@ function isGenericName(name) {
   return /^(asociado(\s+toyota)?|colaborador|empleado|usuario|sin\s+nombre)\b/i.test(clean);
 }
 
+const DEFAULT_CONTROL_PAGOS_USERS = [
+  { employeeNumber: '9997', fullName: 'YONI JAVIER RUIZ DOMINGUEZ', role: 'admin', canUploadExcel: true, canEditTracking: true },
+  { employeeNumber: '14482', fullName: 'ADRIANA LISSET RAMÍREZ CANCINO', role: 'staff', canUploadExcel: false, canEditTracking: true },
+  { employeeNumber: '1', fullName: 'Yoni Ruiz (Admin)', role: 'admin', canUploadExcel: true, canEditTracking: true },
+  { employeeNumber: '10589', fullName: 'VERONICA GOMEZ CALIMALLOR', role: 'admin', canUploadExcel: true, canEditTracking: true },
+  { employeeNumber: '17396', fullName: 'DENNISSE DEL CARMEN GARCÍA LÓPEZ', role: 'admin', canUploadExcel: true, canEditTracking: true },
+  { employeeNumber: '12809', fullName: 'ALBERTO ANGEL RUIZ RUIZ', role: 'admin', canUploadExcel: true, canEditTracking: true }
+];
+
 function getLocalControlPagosUsers() {
   try {
-    const { db } = require('./routes/gastos');
-    const row = db.prepare('SELECT value FROM config WHERE key = ?').get('control_pagos_users');
-    if (row && row.value) {
-      const parsed = JSON.parse(row.value);
+    const { getDB } = require('./routes/gastos');
+    const db = getDB();
+    const row = db.prepare('SELECT valor FROM bandeja_config WHERE clave = ?').get('control_pagos_users');
+    if (row && row.valor) {
+      const parsed = JSON.parse(row.valor);
       if (Array.isArray(parsed.users)) return parsed.users;
     }
   } catch (e) {}
@@ -240,9 +262,12 @@ function getLocalControlPagosUsers() {
 
 function saveLocalControlPagosUsers(users) {
   try {
-    const { db, triggerDriveBackup } = require('./routes/gastos');
+    const { getDB, triggerDriveBackup } = require('./routes/gastos');
+    const db = getDB();
     const payload = { users: Array.isArray(users) ? users : [], updated_at: new Date().toISOString() };
-    db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run('control_pagos_users', JSON.stringify(payload));
+    db.prepare(
+      "INSERT OR REPLACE INTO bandeja_config (clave, valor, updated_at) VALUES (?, ?, datetime('now','localtime'))"
+    ).run('control_pagos_users', JSON.stringify(payload));
     if (typeof triggerDriveBackup === 'function') triggerDriveBackup();
   } catch (e) {}
 }
@@ -264,56 +289,8 @@ async function resolveControlPagosAssociate(empInput, req = null) {
   const target = normalizeEmp(empInput);
   if (!target) return null;
 
-  let rows = [];
-  try {
-    const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=in.(__KPI_USERS_control-pagos__,__DO_SYSTEM_USERS__,__DO_ASSOCIATES_DIRECTORY__)&fecha_cita=eq.2099-12-31&select=folio,datos_recepcion`;
-    const r = await fetch(url, {
-      headers: {
-        apikey: DO_SUPABASE_KEY,
-        Authorization: `Bearer ${DO_SUPABASE_KEY}`,
-        'Cache-Control': 'no-cache'
-      }
-    });
-    if (r.ok) {
-      const data = await r.json();
-      if (Array.isArray(data)) rows = data;
-    }
-  } catch (e) {}
-
   const assocMap = new Map();
-  const dirRow = rows.find(x => x.folio === '__DO_ASSOCIATES_DIRECTORY__');
-  if (Array.isArray(dirRow?.datos_recepcion?.associates)) {
-    for (const a of dirRow.datos_recepcion.associates) {
-      const emp = normalizeEmp(a.numEmpleado || a.employeeNumber);
-      const nombre = String(a.nombreCompleto || a.fullName || a.nombre || '').trim();
-      if (emp && nombre && !isGenericName(nombre)) {
-        assocMap.set(emp, { fullName: nombre, puesto: a.puesto || '', sucursal: a.sucursal || '' });
-      }
-    }
-  }
-
   const authorizedMap = new Map();
-
-  // 1. Usuarios globales de sistema con permiso a KPIs
-  const sysRow = rows.find(x => x.folio === '__DO_SYSTEM_USERS__');
-  if (Array.isArray(sysRow?.datos_recepcion?.users)) {
-    for (const su of sysRow.datos_recepcion.users) {
-      const emp = normalizeEmp(su.numEmpleado || su.username);
-      if (!emp) continue;
-      const perms = Array.isArray(su.permissions) ? su.permissions : [];
-      const isAdmin = su.role === 'admin' || perms.includes('*');
-      if (isAdmin || perms.includes('permisos-kpis')) {
-        const dirInfo = assocMap.get(emp);
-        authorizedMap.set(emp, {
-          employeeNumber: emp,
-          fullName: (dirInfo && dirInfo.fullName) || su.nombre || `Asociado #${emp}`,
-          gestorRole: 'admin',
-          accesoOriente: true,
-          accesoPoniente: true
-        });
-      }
-    }
-  }
 
   const applyUsersList = (usersList) => {
     if (!Array.isArray(usersList)) return;
@@ -349,22 +326,80 @@ async function resolveControlPagosAssociate(empInput, req = null) {
     }
   };
 
-  // 2. Lista específica en Supabase (__KPI_USERS_control-pagos__)
-  const kpiRow = rows.find(x => x.folio === '__KPI_USERS_control-pagos__');
-  if (Array.isArray(kpiRow?.datos_recepcion?.users)) {
-    applyUsersList(kpiRow.datos_recepcion.users);
-  }
+  // 0. Usuarios base autorizados por defecto
+  applyUsersList(DEFAULT_CONTROL_PAGOS_USERS);
 
-  // 3. Lista sincronizada localmente / Google Drive (config: control_pagos_users)
+  // 1. Lista sincronizada localmente / Google Drive (bandeja_config: control_pagos_users)
   const localUsers = getLocalControlPagosUsers();
   if (localUsers.length > 0) {
     applyUsersList(localUsers);
   }
 
-  // 4. Cookie compartida .toyoter.com (toyoter_cp_users) para sincronización instantánea en el mismo navegador
+  // 2. Cookie compartida .toyoter.com (toyoter_cp_users)
   const cookieUsers = parseSharedToyoterUsersCookie(req);
   if (cookieUsers.length > 0) {
     applyUsersList(cookieUsers);
+  }
+
+  // Si ya está resuelto localmente (ej. 9997 o 14482), usar timeout ultrarrápido (450ms) hacia Supabase; si no, 1500ms
+  const supaTimeoutMs = authorizedMap.has(target) ? 450 : 1500;
+
+  let rows = [];
+  try {
+    const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=in.(__KPI_USERS_control-pagos__,__DO_SYSTEM_USERS__,__DO_ASSOCIATES_DIRECTORY__)&fecha_cita=eq.2099-12-31&select=folio,datos_recepcion`;
+    const r = await fetch(url, {
+      headers: {
+        apikey: DO_SUPABASE_KEY,
+        Authorization: `Bearer ${DO_SUPABASE_KEY}`,
+        'Cache-Control': 'no-cache'
+      },
+      signal: AbortSignal.timeout(supaTimeoutMs)
+    });
+    if (r.ok) {
+      const data = await r.json();
+      if (Array.isArray(data)) rows = data;
+    }
+  } catch (e) {}
+
+  if (rows.length > 0) {
+    const dirRow = rows.find(x => x.folio === '__DO_ASSOCIATES_DIRECTORY__');
+    if (Array.isArray(dirRow?.datos_recepcion?.associates)) {
+      for (const a of dirRow.datos_recepcion.associates) {
+        const emp = normalizeEmp(a.numEmpleado || a.employeeNumber);
+        const nombre = String(a.nombreCompleto || a.fullName || a.nombre || '').trim();
+        if (emp && nombre && !isGenericName(nombre)) {
+          assocMap.set(emp, { fullName: nombre, puesto: a.puesto || '', sucursal: a.sucursal || '' });
+        }
+      }
+    }
+
+    const sysRow = rows.find(x => x.folio === '__DO_SYSTEM_USERS__');
+    if (Array.isArray(sysRow?.datos_recepcion?.users)) {
+      for (const su of sysRow.datos_recepcion.users) {
+        const emp = normalizeEmp(su.numEmpleado || su.username);
+        if (!emp) continue;
+        const perms = Array.isArray(su.permissions) ? su.permissions : [];
+        const isAdmin = su.role === 'admin' || perms.includes('*');
+        if (isAdmin || perms.includes('permisos-kpis')) {
+          const dirInfo = assocMap.get(emp);
+          authorizedMap.set(emp, {
+            employeeNumber: emp,
+            fullName: (dirInfo && dirInfo.fullName) || su.nombre || `Asociado #${emp}`,
+            gestorRole: 'admin',
+            accesoOriente: true,
+            accesoPoniente: true
+          });
+        }
+      }
+    }
+
+    const kpiRow = rows.find(x => x.folio === '__KPI_USERS_control-pagos__');
+    if (Array.isArray(kpiRow?.datos_recepcion?.users)) {
+      applyUsersList(kpiRow.datos_recepcion.users);
+    }
+
+    if (localUsers.length > 0) applyUsersList(localUsers);
+    if (cookieUsers.length > 0) applyUsersList(cookieUsers);
   }
 
   return authorizedMap.get(target) || null;
@@ -374,19 +409,22 @@ async function resolveControlPagosAssociate(empInput, req = null) {
 app.get('/api/auth/users', async (req, res) => {
   try {
     let remoteUsers = [];
-    const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.__KPI_USERS_control-pagos__&fecha_cita=eq.2099-12-31&select=datos_recepcion`;
-    const r = await fetch(url, {
-      headers: { apikey: DO_SUPABASE_KEY, Authorization: `Bearer ${DO_SUPABASE_KEY}`, 'Cache-Control': 'no-cache' }
-    });
-    if (r.ok) {
-      const rows = await r.json();
-      if (Array.isArray(rows) && rows[0]?.datos_recepcion?.users) {
-        remoteUsers = rows[0].datos_recepcion.users;
+    try {
+      const url = `${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.__KPI_USERS_control-pagos__&fecha_cita=eq.2099-12-31&select=datos_recepcion`;
+      const r = await fetch(url, {
+        headers: { apikey: DO_SUPABASE_KEY, Authorization: `Bearer ${DO_SUPABASE_KEY}`, 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(1500)
+      });
+      if (r.ok) {
+        const rows = await r.json();
+        if (Array.isArray(rows) && rows[0]?.datos_recepcion?.users) {
+          remoteUsers = rows[0].datos_recepcion.users;
+        }
       }
-    }
+    } catch (e) {}
     const localUsers = getLocalControlPagosUsers();
     const merged = new Map();
-    for (const u of [...remoteUsers, ...localUsers]) {
+    for (const u of [...DEFAULT_CONTROL_PAGOS_USERS, ...remoteUsers, ...localUsers]) {
       const emp = normalizeEmp(u && (u.employeeNumber || u.numEmpleado));
       if (emp) merged.set(emp, u);
     }
@@ -404,7 +442,7 @@ app.post('/api/auth/users', async (req, res) => {
     }
     saveLocalControlPagosUsers(users);
     const payload = { users, updated_at: new Date().toISOString() };
-    await fetch(`${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.__KPI_USERS_control-pagos__&fecha_cita=eq.2099-12-31`, {
+    fetch(`${DO_SUPABASE_URL}/rest/v1/taller_citas?folio=eq.__KPI_USERS_control-pagos__&fecha_cita=eq.2099-12-31`, {
       method: 'PATCH',
       headers: {
         apikey: DO_SUPABASE_KEY,
@@ -412,8 +450,9 @@ app.post('/api/auth/users', async (req, res) => {
         'Content-Type': 'application/json',
         Prefer: 'return=minimal'
       },
-      body: JSON.stringify({ datos_recepcion: payload })
-    });
+      body: JSON.stringify({ datos_recepcion: payload }),
+      signal: AbortSignal.timeout(1500)
+    }).catch(() => {});
     return res.json({ ok: true, count: users.length });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
